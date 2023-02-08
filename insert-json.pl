@@ -12,7 +12,9 @@ use DBI qw(:sql_types);
 use DBD::Pg qw(:pg_types);
 
 my %opts;
-getopts('ws:', \%opts);
+getopts('hws:', \%opts);
+
+my $har_mode = $opts{h};
 
 my $global_weak = $opts{w};
 my $global_source = $opts{s} // "json-feed";
@@ -574,13 +576,30 @@ sub generic_recurse {
 sub process_content {
     my $content = shift;
     my $data = decode_json $content;
-    generic_recurse $data;
+    if ( $har_mode ) {
+	die "bad HAR format"
+	    unless defined($data->{"log"}->{"entries"})
+	    && ref($data->{"log"}->{"entries"}) eq "ARRAY";
+	foreach my $ent ( @{$data->{"log"}->{"entries"}} ) {
+	    printf STDERR "processing request made at %s\n", $ent->{"startedDateTime"};
+	    if ( $ent->{"response"}->{"status"} == 200
+		 && ( $ent->{"response"}->{"content"}->{"mimeType"}
+		      =~ m/^application\/json(?:\;|$)/ ) ) {
+		my $subcontent = $ent->{"response"}->{"content"}->{"text"};
+		my $subdata = JSON::XS->new->decode($subcontent);
+		generic_recurse $subdata;
+	    }
+	}
+    } else {
+	generic_recurse $data;
+    }
 }
 
 if ( scalar(@ARGV) ) {
     foreach my $fname ( @ARGV ) {
 	open my $f, "<", $fname
 	    or die "can't open $fname: $!";
+	print STDERR "processing file $fname\n";
 	local $/ = undef;  # enable localized slurp mode
 	my $content = <$f>;
 	process_content $content;
