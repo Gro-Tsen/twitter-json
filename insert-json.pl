@@ -3,11 +3,19 @@
 use strict;
 use warnings;
 
+use Getopt::Std;
+
 use JSON::XS;
 use DateTime::Format::Strptime;
 
 use DBI qw(:sql_types);
 use DBD::Pg qw(:pg_types);
+
+my %opts;
+getopts('ws:', \%opts);
+
+my $global_weak = $opts{w};
+my $global_source = $opts{s} // "json-feed";
 
 binmode STDOUT, ":utf8";
 
@@ -71,6 +79,10 @@ my $dbname = "twitter";
 my $dbh;  # Connection to database
 my $insert_tweet_sth;
 my $weak_insert_tweet_sth;
+my $insert_media_sth;
+my $weak_insert_media_sth;
+my $insert_user_sth;
+my $weak_insert_user_sth;
 
 sub do_connect {
     $dbh = DBI->connect("dbi:Pg:dbname=$dbname", "", "", {AutoCommit=>1,RaiseError=>1,pg_enable_utf8=>1});
@@ -84,45 +96,87 @@ sub do_connect {
 	. ", retweeted_id , retweeted_author_id , retweeted_author_screen_name "
 	. ", quoted_id , quoted_author_id , quoted_author_screen_name "
 	. ", full_text , input_text , lang "
-	. ", favorite_count , quote_count , reply_count "
+	. ", favorite_count , retweet_count , quote_count , reply_count "
 	. ", orig , meta_source ) "
-	. "VALUES ( ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::json,? ) ";
+	. "VALUES ( ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::json,? ) ";
     my $conflict = "ON CONFLICT ( id ) DO UPDATE SET "
 	. "id = EXCLUDED.id "
 	. ", created_at = EXCLUDED.created_at "
 	. ", author_id = EXCLUDED.author_id "
 	. ", author_screen_name = EXCLUDED.author_screen_name "
-	. ", conversation_id = EXCLUDED.conversation_id "
-	. ", thread_id = EXCLUDED.thread_id "
-	. ", replyto_id = EXCLUDED.replyto_id "
-	. ", replyto_author_id = EXCLUDED.replyto_author_id "
-	. ", replyto_author_screen_name = EXCLUDED.replyto_author_screen_name "
-	. ", retweeted_id = EXCLUDED.retweeted_id "
-	. ", retweeted_author_id = EXCLUDED.retweeted_author_id "
-	. ", retweeted_author_screen_name = EXCLUDED.retweeted_author_screen_name "
-	. ", quoted_id = EXCLUDED.quoted_id "
-	. ", quoted_author_id = EXCLUDED.quoted_author_id "
-	. ", quoted_author_screen_name = EXCLUDED.quoted_author_screen_name "
+	. ", conversation_id = COALESCE(EXCLUDED.conversation_id, tweets.conversation_id) "
+	. ", thread_id = COALESCE(EXCLUDED.thread_id, tweets.thread_id) "
+	. ", replyto_id = COALESCE(EXCLUDED.replyto_id, tweets.replyto_id) "
+	. ", replyto_author_id = COALESCE(EXCLUDED.replyto_author_id, tweets.replyto_author_id) "
+	. ", replyto_author_screen_name = COALESCE(EXCLUDED.replyto_author_screen_name, tweets.replyto_author_screen_name) "
+	. ", retweeted_id = COALESCE(EXCLUDED.retweeted_id, tweets.retweeted_id) "
+	. ", retweeted_author_id = COALESCE(EXCLUDED.retweeted_author_id, tweets.retweeted_author_id) "
+	. ", retweeted_author_screen_name = COALESCE(EXCLUDED.retweeted_author_screen_name, tweets.retweeted_author_screen_name) "
+	. ", quoted_id = COALESCE(EXCLUDED.quoted_id, tweets.quoted_id) "
+	. ", quoted_author_id = COALESCE(EXCLUDED.quoted_author_id, tweets.quoted_author_id) "
+	. ", quoted_author_screen_name = COALESCE(EXCLUDED.quoted_author_screen_name, tweets.quoted_author_screen_name) "
 	. ", full_text = EXCLUDED.full_text "
 	. ", input_text = EXCLUDED.input_text "
-	. ", lang = EXCLUDED.lang "
-	. ", favorite_count = EXCLUDED.favorite_count "
-	. ", quote_count = EXCLUDED.quote_count "
-	. ", reply_count = EXCLUDED.reply_count "
+	. ", lang = COALESCE(EXCLUDED.lang, tweets.lang) "
+	. ", favorite_count = COALESCE(EXCLUDED.favorite_count, tweets.favorite_count) "
+	. ", retweet_count = COALESCE(EXCLUDED.retweet_count, tweets.retweet_count) "
+	. ", quote_count = COALESCE(EXCLUDED.quote_count, tweets.quote_count) "
+	. ", reply_count = COALESCE(EXCLUDED.reply_count, tweets.reply_count) "
 	. ", orig = EXCLUDED.orig "
-	. ", meta_source = EXCLUDED.meta_source "
-	. ", meta_updated_at = now() ";
+	. ", meta_updated_at = now() "
+	. ", meta_source = EXCLUDED.meta_source ";
     my $noconflict = "ON CONFLICT ( id ) DO NOTHING ";
     my $returning = "RETURNING id";
     $insert_tweet_sth = $dbh->prepare($command . $conflict . $returning);
     $weak_insert_tweet_sth = $dbh->prepare($command . $noconflict . $returning);
+    $command = "INSERT INTO media "
+	. "( id , parent_id , short_url , display_url "
+	. ", media_url , media_type , alt_text "
+	. ", orig , meta_source ) "
+	. "VALUES ( ?,?,?,?,?,?,?,?::json,? ) ";
+    $conflict = "ON CONFLICT ( id ) DO UPDATE SET "
+	. "id = EXCLUDED.id "
+	. ", parent_id = EXCLUDED.parent_id "
+	. ", short_url = EXCLUDED.short_url "
+	. ", display_url = EXCLUDED.display_url "
+	. ", media_url = COALESCE(EXCLUDED.media_url, media.media_url) "
+	. ", media_type = EXCLUDED.media_type "
+	. ", alt_text = COALESCE(EXCLUDED.alt_text, media.alt_text) "
+	. ", orig = EXCLUDED.orig "
+	. ", meta_updated_at = now() "
+	. ", meta_source = EXCLUDED.meta_source ";
+    $insert_media_sth = $dbh->prepare($command . $conflict . $returning);
+    $weak_insert_media_sth = $dbh->prepare($command . $noconflict . $returning);
+    $command = "INSERT INTO users "
+	. "( id , created_at , screen_name , full_name "
+	. ", profile_description , profile_input_description , profile_url "
+	. ", pinned_id , followers_count , following_count , statuses_count "
+	. ", orig , meta_source ) "
+	. "VALUES ( ?,?,?,?,?,?,?,?,?,?,?,?::json,? ) ";
+    $conflict = "ON CONFLICT ( id ) DO UPDATE SET "
+	. "id = EXCLUDED.id "
+	. ", created_at = EXCLUDED.created_at "
+	. ", screen_name = EXCLUDED.screen_name "
+	. ", full_name = COALESCE(EXCLUDED.full_name, users.full_name) "
+	. ", profile_description = COALESCE(EXCLUDED.profile_description, users.profile_description) "
+	. ", profile_input_description = COALESCE(EXCLUDED.profile_input_description, users.profile_input_description) "
+	. ", profile_url = COALESCE(EXCLUDED.profile_url, users.profile_url) "
+	. ", pinned_id = COALESCE(EXCLUDED.pinned_id, users.pinned_id) "
+	. ", followers_count = COALESCE(EXCLUDED.followers_count, users.followers_count) "
+	. ", following_count = COALESCE(EXCLUDED.following_count, users.following_count) "
+	. ", statuses_count = COALESCE(EXCLUDED.statuses_count, users.statuses_count) "
+	. ", orig = EXCLUDED.orig "
+	. ", meta_updated_at = now() "
+	. ", meta_source = EXCLUDED.meta_source ";
+    $insert_user_sth = $dbh->prepare($command . $conflict . $returning);
+    $weak_insert_user_sth = $dbh->prepare($command . $noconflict . $returning);
 }
 
 do_connect;
 
 sub record_tweet {
     my $r = shift;
-    my $weak = shift;  # If 1 leave existing records be
+    my $weak = shift || $global_weak;  # If 1 leave existing records be
     my $orig = encode_json($r);
     ## Basic stuff
     my $id = $r->{"rest_id"};
@@ -167,7 +221,8 @@ sub record_tweet {
 	print STDERR "tweet $id has bad or missing author object: aborting\n";
 	return;
     }
-    my $author_screen_name = $r->{"core"}->{"user_results"}->{"result"}->{"legacy"}->{"screen_name"};
+    my $author_r = $r->{"core"}->{"user_results"}->{"result"};
+    my $author_screen_name = $author_r->{"legacy"}->{"screen_name"};
     unless ( defined($author_screen_name) ) {
 	print STDERR "tweet $id has no author screen name: aborting\n";
 	return;
@@ -279,7 +334,7 @@ sub record_tweet {
       my @substitutions;
       my $found_quoted_permalink_in_entities = 0;
       unless ( defined($rl->{"entities"}) ) {
-	  print STDERR "tweet $id has no entities part";
+	  print STDERR "tweet $id has no entities part\n";
 	  last SUBSTITUTE;
       }
       if ( defined($rl->{"entities"}->{"urls"}) ) {
@@ -317,6 +372,7 @@ sub record_tweet {
     ## Miscellaneous
     my $lang = $rl->{"lang"};
     my $favorite_count = $rl->{"favorite_count"};
+    my $retweet_count = $rl->{"retweet_count"};
     my $quote_count = $rl->{"quote_count"};
     my $reply_count = $rl->{"reply_count"};
     ## Insert
@@ -340,14 +396,142 @@ sub record_tweet {
     $sth->bind_param(17, $input_text, { pg_type => PG_TEXT });
     $sth->bind_param(18, $lang, { pg_type => PG_TEXT });
     $sth->bind_param(19, $favorite_count, SQL_INTEGER);
-    $sth->bind_param(20, $quote_count, SQL_INTEGER);
-    $sth->bind_param(21, $reply_count, SQL_INTEGER);
-    $sth->bind_param(22, $orig, { pg_type => PG_TEXT });
-    $sth->bind_param(23, 1, SQL_INTEGER);
+    $sth->bind_param(20, $retweet_count, SQL_INTEGER);
+    $sth->bind_param(21, $quote_count, SQL_INTEGER);
+    $sth->bind_param(22, $reply_count, SQL_INTEGER);
+    $sth->bind_param(23, $orig, { pg_type => PG_TEXT });
+    $sth->bind_param(24, $global_source, { pg_type => PG_TEXT });
     $sth->execute();
-    ## Process retweeted or quoted tweet
+    ## Process media, author, and retweeted or quoted tweet
+    my $media_lst_r = ($rl->{"extended_entities"}->{"media"}) // ($rl->{"entities"}->{"media"});
+    if ( defined($media_lst_r) && ref($media_lst_r) eq "ARRAY" ) {
+	foreach my $media_r ( @{$media_lst_r} ) {
+	    record_media($media_r, $weak, $id);
+	}
+    }
+    record_user($author_r, $weak) if defined($author_r);
     record_tweet($retweeted_r, 1) if defined($retweeted_r);
     record_tweet($quoted_r, 1) if defined($quoted_r);
+}
+
+sub record_media {
+    my $r = shift;
+    my $weak = shift || $global_weak;  # If 1 leave existing records be
+    my $caller_id = shift;
+    my $orig = encode_json($r);
+    ## Basic stuff
+    my $id = $r->{"id_str"};
+    unless ( defined($id) ) {
+	print STDERR "media from tweet $caller_id has no id: aborting\n";
+	return;
+    }
+    unless ( $id =~ m/\A[0-9]+\z/ ) {
+	print STDERR "media from tweet $caller_id has badly formed id: aborting\n";
+	return;
+    }
+    my $parent_id = $r->{"source_status_id_str"} // $caller_id;
+    my $short_url = $r->{"url"};
+    unless ( defined($short_url) ) {
+	print STDERR "media $id has no short url: aborting\n";
+	return;
+    }
+    my $display_url = $r->{"display_url"};
+    unless ( defined($display_url) ) {
+	print STDERR "media $id has no display url: aborting\n";
+	return;
+    }
+    my $media_url = $r->{"media_url_https"};
+    my $media_type = $r->{"type"};
+    unless ( defined($media_type) ) {
+	print STDERR "media $id has no type: aborting\n";
+	return;
+    }
+    my $alt_text = $r->{"ext_alt_text"};
+    ## Insert
+    my $sth = $weak ? $weak_insert_media_sth : $insert_media_sth;
+    $sth->bind_param(1, $id, { pg_type => PG_TEXT });
+    $sth->bind_param(2, $parent_id, { pg_type => PG_TEXT });
+    $sth->bind_param(3, $short_url, { pg_type => PG_TEXT });
+    $sth->bind_param(4, $display_url, { pg_type => PG_TEXT });
+    $sth->bind_param(5, $media_url, { pg_type => PG_TEXT });
+    $sth->bind_param(6, $media_type, { pg_type => PG_TEXT });
+    $sth->bind_param(7, $alt_text, { pg_type => PG_TEXT });
+    $sth->bind_param(8, $orig, { pg_type => PG_TEXT });
+    $sth->bind_param(9, $global_source, { pg_type => PG_TEXT });
+    $sth->execute();
+}
+
+sub record_user {
+    my $r = shift;
+    my $weak = shift || $global_weak;  # If 1 leave existing records be
+    my $orig = encode_json($r);
+    ## Basic stuff
+    my $id = $r->{"rest_id"};
+    unless ( defined($id) ) {
+	print STDERR "user has no id: aborting\n";
+	return;
+    }
+    unless ( $id =~ m/\A[0-9]+\z/ ) {
+	print STDERR "user has badly formed id: aborting\n";
+	return;
+    }
+    my $rl = $r->{"legacy"};
+    unless ( defined($rl) && ref($rl) eq "HASH" ) {
+	print STDERR "user $id has no legacy field: aborting\n";
+	return;
+    }
+    my $created_at_str = $rl->{"created_at"};
+    unless ( defined($created_at_str) ) {
+	print STDERR "user $id has no creation date: aborting\n";
+	return;
+    }
+    my $created_at = $datetime_parser->parse_datetime($created_at_str);
+    unless ( defined($created_at) ) {
+	print STDERR "user $id has invalid creation date: aborting\n";
+	return;
+    }
+    my $screen_name = $rl->{"screen_name"};
+    my $full_name = $rl->{"name"};
+    ## Description
+    my $profile_description = $rl->{"description"};
+    my $profile_input_description;
+    if ( defined($profile_description) ) {SUBSTITUTE:{
+	$profile_input_description = $profile_description;
+	my @substitutions;
+	unless ( defined($rl->{"entities"}->{"description"}) ) {
+	    print STDERR "user $id has no entities part\n";
+	    last SUBSTITUTE;
+	}
+	for my $ent ( @{$rl->{"entities"}->{"description"}->{"urls"}} ) {
+	    my $idx0 = $ent->{"indices"}->[0];
+	    my $idx1 = $ent->{"indices"}->[1];
+	    # NO html_quote here (the description is NOT html-encoded)
+	    push @substitutions, [$idx0, $idx1-$idx0, $ent->{"url"}, $ent->{"expanded_url"}];
+	}
+	$profile_input_description = substitute_in_string $profile_input_description, \@substitutions;
+    }}
+    ## Miscellaneous
+    my $profile_url = $rl->{"entities"}->{"url"}->{"urls"}->[0]->{"expanded_url"};
+    my $pinned_id = $rl->{"pinned_tweet_ids_str"}->[0];
+    my $followers_count = $rl->{"followers_count"};
+    my $following_count = $rl->{"friends_count"};
+    my $statuses_count = $rl->{"statuses_count"};
+    ## Insert
+    my $sth = $weak ? $weak_insert_user_sth : $insert_user_sth;
+    $sth->bind_param(1, $id, { pg_type => PG_TEXT });
+    $sth->bind_param(2, $created_at, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(3, $screen_name, { pg_type => PG_TEXT });
+    $sth->bind_param(4, $full_name, { pg_type => PG_TEXT });
+    $sth->bind_param(5, $profile_description, { pg_type => PG_TEXT });
+    $sth->bind_param(6, $profile_input_description, { pg_type => PG_TEXT });
+    $sth->bind_param(7, $profile_url, { pg_type => PG_TEXT });
+    $sth->bind_param(8, $pinned_id, { pg_type => PG_TEXT });
+    $sth->bind_param(9, $followers_count, SQL_INTEGER);
+    $sth->bind_param(10, $following_count, SQL_INTEGER);
+    $sth->bind_param(11, $statuses_count, SQL_INTEGER);
+    $sth->bind_param(12, $orig, { pg_type => PG_TEXT });
+    $sth->bind_param(13, $global_source, { pg_type => PG_TEXT });
+    $sth->execute();
 }
 
 sub generic_recurse {
@@ -357,9 +541,15 @@ sub generic_recurse {
 	    generic_recurse ($r->[$i]);
 	}
     } elsif ( ref($r) eq "HASH" ) {
-	if ( defined($r->{"__typename"}) && $r->{"__typename"} eq "Tweet" ) {
+	if ( defined($r->{"__typename"}) && $r->{"__typename"} eq "Tweet"
+	     && defined($r->{"rest_id"}) ) {
 	    record_tweet($r, 0);
 	    return;  # Recusion is done inside record_tweet
+	}
+	if ( defined($r->{"__typename"}) && $r->{"__typename"} eq "User"
+	     && defined($r->{"rest_id"}) ) {
+	    record_user($r, 0);
+	    return;
 	}
 	foreach my $k ( keys(%{$r}) ) {
 	    generic_recurse ($r->{$k});

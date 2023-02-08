@@ -43,6 +43,8 @@ CREATE TABLE tweets (
        lang text ,
        /* ["legacy"]["favorite_count"] */
        favorite_count int ,
+       /* ["legacy"]["retweet_count"] */
+       retweet_count int ,
        /* ["legacy"]["quote_count"] */
        quote_count int ,
        /* ["legacy"]["reply_count"] */
@@ -51,24 +53,28 @@ CREATE TABLE tweets (
        orig json NOT NULL ,
        meta_inserted_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP ,
        meta_updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP ,
-       meta_source int NOT NULL
+       meta_source text NOT NULL
 ) ;
 CREATE TABLE media (
        /* ["id_str"] */
        id text PRIMARY KEY ,
        /* id of parent tweet, not always avail as ["source_status_id_str"] */
        parent_id text NOT NULL ,
+       /* ["url"] */
+       short_url text NOT NULL ,
        /* ["display_url"] */
-       display_url text ,
-       /* ["media_url"] */
+       display_url text NOT NULL ,
+       /* ["media_url_https"] */
        media_url text ,
+       /* ["type"] */
+       media_type text NOT NULL ,
        /* ["ext_alt_text"] */
        alt_text text ,
        /* with ["display_url"] */
        orig json NOT NULL ,
        meta_inserted_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP ,
        meta_updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP ,
-       meta_source int NOT NULL
+       meta_source text NOT NULL
 ) ;
 CREATE TABLE users (
        /* ["rest_id"] */
@@ -78,16 +84,26 @@ CREATE TABLE users (
        /* ["legacy"]["screen_name"] */
        screen_name text NOT NULL ,
        /* ["legacy"]["name"] */
-       full_name text NOT NULL ,
+       full_name text ,
        /* ["legacy"]["description"] */
-       description text ,
+       profile_description text ,
+       /* reconstructed from profile_descripton, URLs substituted by expanded_url */
+       profile_input_description text NOT NULL ,
+       /* ["legacy"]["entity"]["url"]["urls"][0]["expanded_url"] */
+       profile_url text ,
        /* ["legacy"]["pinned_tweet_ids_str"][0] */
        pinned_id text ,
+       /* ["legacy"]["followers_count"] */
+       followers_count int ,
+       /* ["legacy"]["friends_count"] */
+       following_count int ,
+       /* ["legacy"]["statuses_count"] */
+       statuses_count int ,
        /* with ["__itemType"]=="User" */
        orig json NOT NULL ,
        meta_inserted_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP ,
        meta_updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP ,
-       meta_source int NOT NULL
+       meta_source text NOT NULL
 ) ;
 CREATE INDEX tweets_author_key ON tweets ( author_id ) ;
 CREATE INDEX tweets_author_screen_name_key ON tweets ( author_screen_name ) ;
@@ -103,4 +119,6 @@ CREATE INDEX tweets_quoted_key ON tweets ( quoted_id ) ;
 CREATE INDEX tweets_quoted_author_key ON tweets ( quoted_author_id ) ;
 CREATE INDEX tweets_quoted_screen_name_key ON tweets ( quoted_author_screen_name ) ;
 CREATE INDEX media_parent_key ON media ( parent_id ) ;
+CREATE INDEX media_short_url_key ON media ( short_url ) ;
+CREATE INDEX media_display_url_key ON media ( display_url ) ;
 CREATE INDEX users_screen_name_key ON users ( screen_name ) ;
