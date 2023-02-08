@@ -85,6 +85,7 @@ my $insert_user_sth;
 my $weak_insert_user_sth;
 
 sub do_connect {
+    # Connect to database and prepare insert statements.
     $dbh = DBI->connect("dbi:Pg:dbname=$dbname", "", "", {AutoCommit=>1,RaiseError=>1,pg_enable_utf8=>1});
     die ("Can't connect to database: " . $DBI::errstr . "\n") unless $dbh;
     $dbh->do("SET TIME ZONE 0");
@@ -175,6 +176,9 @@ sub do_connect {
 do_connect;
 
 sub record_tweet {
+    # Insert tweet into database.  Arguments are the ref to the
+    # tweet's (decoded) JSON, and a weak parameter indicating whether
+    # we should leave existing entries.
     my $r = shift;
     my $weak = shift || $global_weak;  # If 1 leave existing records be
     my $orig = encode_json($r);
@@ -415,6 +419,10 @@ sub record_tweet {
 }
 
 sub record_media {
+    # Insert media entry into database.  Arguments are the ref to the
+    # media entry's (decoded) JSON, a weak parameter indicating
+    # whether we should leave existing entries, and the id of the
+    # caller tweet.
     my $r = shift;
     my $weak = shift || $global_weak;  # If 1 leave existing records be
     my $caller_id = shift;
@@ -462,6 +470,9 @@ sub record_media {
 }
 
 sub record_user {
+    # Insert user into database.  Arguments are the ref to the user's
+    # (decoded) JSON, and a weak parameter indicating whether we
+    # should leave existing entries.
     my $r = shift;
     my $weak = shift || $global_weak;  # If 1 leave existing records be
     my $orig = encode_json($r);
@@ -535,6 +546,8 @@ sub record_user {
 }
 
 sub generic_recurse {
+    # Recurse into JSON structure, calling record_tweet or record_user
+    # on whatever looks like it should be inserted.
     my $r = shift;
     if ( ref($r) eq "ARRAY" ) {
 	for ( my $i=0 ; $i<scalar(@{$r}) ; $i++ ) {
@@ -557,11 +570,19 @@ sub generic_recurse {
     }
 }
 
-my $content;
-if (1) {
+if ( scalar(@ARGV) ) {
+    foreach my $fname ( @ARGV ) {
+	open my $f, "<", $fname
+	    or die "can't open $fname: $!";
+	local $/ = undef;  # enable localized slurp mode
+	my $content = <$f>;
+	my $data = decode_json $content;
+	generic_recurse $data;
+	close $f;
+    }
+} else {
     local $/ = undef;  # enable localized slurp mode
-    $content = <>;
+    my $content = <STDIN>;
+    my $data = decode_json $content;
+    generic_recurse $data;
 }
-my $data = decode_json $content;
-
-generic_recurse $data;
