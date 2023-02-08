@@ -1,5 +1,7 @@
 #! /usr/local/bin/perl -w
 
+# TWEETS_ARCHIVE_USER_ID="1018078984280657920" TWEETS_ARCHIVE_USER_SCREEN_NAME="gro_tsen" ./insert-archive.pl -w /tmp/twitter-archive/data/tweets.js
+
 use strict;
 use warnings;
 
@@ -15,7 +17,13 @@ my %opts;
 getopts('ws:', \%opts);
 
 my $global_weak = $opts{w};
-my $global_source = $opts{s} // "json-feed";
+my $global_source = $opts{s} // "tweets-archive";
+
+my $global_user_id = $ENV{"TWEETS_ARCHIVE_USER_ID"};
+my $global_user_screen_name = $ENV{"TWEETS_ARCHIVE_USER_SCREEN_NAME"};
+unless ( defined($global_user_id) && defined($global_user_screen_name) ) {
+    die "please run this program with TWEETS_ARCHIVE_USER_ID and TWEETS_ARCHIVE_USER_SCREEN_NAME evironment variables set";
+}
 
 # binmode STDOUT, ":utf8";
 
@@ -81,8 +89,6 @@ my $insert_tweet_sth;
 my $weak_insert_tweet_sth;
 my $insert_media_sth;
 my $weak_insert_media_sth;
-my $insert_user_sth;
-my $weak_insert_user_sth;
 
 sub do_connect {
     # Connect to database and prepare insert statements.
@@ -148,34 +154,11 @@ sub do_connect {
 	. ", meta_source = EXCLUDED.meta_source ";
     $insert_media_sth = $dbh->prepare($command . $conflict . $returning);
     $weak_insert_media_sth = $dbh->prepare($command . $noconflict . $returning);
-    $command = "INSERT INTO users "
-	. "( id , created_at , screen_name , full_name "
-	. ", profile_description , profile_input_description , profile_url "
-	. ", pinned_id , followers_count , following_count , statuses_count "
-	. ", orig , meta_source ) "
-	. "VALUES ( ?,?,?,?,?,?,?,?,?,?,?,?::json,? ) ";
-    $conflict = "ON CONFLICT ( id ) DO UPDATE SET "
-	. "id = EXCLUDED.id "
-	. ", created_at = EXCLUDED.created_at "
-	. ", screen_name = EXCLUDED.screen_name "
-	. ", full_name = COALESCE(EXCLUDED.full_name, users.full_name) "
-	. ", profile_description = COALESCE(EXCLUDED.profile_description, users.profile_description) "
-	. ", profile_input_description = COALESCE(EXCLUDED.profile_input_description, users.profile_input_description) "
-	. ", profile_url = COALESCE(EXCLUDED.profile_url, users.profile_url) "
-	. ", pinned_id = COALESCE(EXCLUDED.pinned_id, users.pinned_id) "
-	. ", followers_count = COALESCE(EXCLUDED.followers_count, users.followers_count) "
-	. ", following_count = COALESCE(EXCLUDED.following_count, users.following_count) "
-	. ", statuses_count = COALESCE(EXCLUDED.statuses_count, users.statuses_count) "
-	. ", orig = EXCLUDED.orig "
-	. ", meta_updated_at = now() "
-	. ", meta_source = EXCLUDED.meta_source ";
-    $insert_user_sth = $dbh->prepare($command . $conflict . $returning);
-    $weak_insert_user_sth = $dbh->prepare($command . $noconflict . $returning);
 }
 
 do_connect;
 
-sub record_tweet {
+sub record_tweet_v1 {
     # Insert tweet into database.  Arguments are the ref to the
     # tweet's (decoded) JSON, and a weak parameter indicating whether
     # we should leave existing entries.
@@ -183,7 +166,7 @@ sub record_tweet {
     my $weak = shift || $global_weak;  # If 1 leave existing records be
     my $orig = encode_json($r);
     ## Basic stuff
-    my $id = $r->{"rest_id"};
+    my $id = $r->{"id_str"};
     unless ( defined($id) ) {
 	print STDERR "tweet has no id: aborting\n";
 	return;
@@ -192,15 +175,7 @@ sub record_tweet {
 	print STDERR "tweet has badly formed id: aborting\n";
 	return;
     }
-    my $rl = $r->{"legacy"};
-    unless ( defined($rl) && ref($rl) eq "HASH" ) {
-	print STDERR "tweet $id has no legacy field: aborting\n";
-	return;
-    }
-    unless ( defined($rl->{"id_str"}) && ($rl->{"id_str"} eq $id) ) {
-	print STDERR "tweet $id does not have the same id in legacy field: aborting\n";
-	return;
-    }
+    my $rl = $r;  # Simplify synchronization with insert-json.pl
     my $created_at_str = $rl->{"created_at"};
     unless ( defined($created_at_str) ) {
 	print STDERR "tweet $id has no creation date: aborting\n";
@@ -212,27 +187,8 @@ sub record_tweet {
 	return;
     }
     my $created_at_iso = $created_at->strftime("%Y-%m-%d %H:%M:%S+00:00");
-    my $author_id = $rl->{"user_id_str"};
-    unless ( defined($author_id) ) {
-	print STDERR "tweet $id has no author id: aborting\n";
-	return;
-    }
-    unless ( defined($r->{"core"}->{"user_results"}->{"result"})
-	     && defined($r->{"core"}->{"user_results"}->{"result"}->{"__typename"})
-	     && ($r->{"core"}->{"user_results"}->{"result"}->{"__typename"} eq "User")
-	     && defined($r->{"core"}->{"user_results"}->{"result"}->{"rest_id"})
-	     && ($r->{"core"}->{"user_results"}->{"result"}->{"rest_id"} eq $author_id) ) {
-	print STDERR "tweet $id has bad or missing author object: aborting\n";
-	return;
-    }
-    my $author_r = $r->{"core"}->{"user_results"}->{"result"};
-    my $author_screen_name = $author_r->{"legacy"}->{"screen_name"};
-    unless ( defined($author_screen_name) ) {
-	print STDERR "tweet $id has no author screen name: aborting\n";
-	return;
-    }
-    my $conversation_id = $rl->{"conversation_id_str"};
-    my $thread_id = $rl->{"self_thread"}->{"id_str"};
+    my $author_id = $rl->{"user"}->{"id_str"} // $global_user_id;
+    my $author_screen_name = $rl->{"user"}->{"screen_name"} // $global_user_screen_name;
     ## Replyto
     my ($replyto_id, $replyto_author_id, $replyto_author_screen_name);
     $replyto_id = $rl->{"in_reply_to_status_id_str"};
@@ -245,82 +201,13 @@ sub record_tweet {
 	# }
     }
     ## Retweeted
-    my $retweeted_r;
-    my ($retweeted_id, $retweeted_author_id, $retweeted_author_screen_name);
-    if ( defined($rl->{"retweeted_status_result"}) ) {RETWEETED_IF:{
-	my $rtwd = $rl->{"retweeted_status_result"}->{"result"};
-	unless ( defined($rtwd)
-		 && defined($rtwd->{"__typename"})
-		 && ($rtwd->{"__typename"} eq "Tweet")
-		 && defined($rtwd->{"rest_id"}) ) {
-	    print STDERR "tweet $id retweeting another does not give retweeted id\n";
-	    last RETWEETED_IF;
-	}
-	$retweeted_r = $rtwd;
-	$retweeted_id = $rtwd->{"rest_id"};
-	my $rtwdl = $rtwd->{"legacy"};
-	$retweeted_author_id = $rtwdl->{"user_id_str"};
-	unless ( defined($retweeted_author_id) ) {
-	    print STDERR "tweet $id retweeting $retweeted_id gives no author id\n";
-	    last RETWEETED_IF;
-	}
-	unless ( defined($rtwd->{"core"}->{"user_results"}->{"result"})
-		 && defined($rtwd->{"core"}->{"user_results"}->{"result"}->{"__typename"})
-		 && ($rtwd->{"core"}->{"user_results"}->{"result"}->{"__typename"} eq "User")
-		 && defined($rtwd->{"core"}->{"user_results"}->{"result"}->{"rest_id"})
-		 && ($rtwd->{"core"}->{"user_results"}->{"result"}->{"rest_id"} eq $retweeted_author_id) ) {
-	    print STDERR "tweet $id retweeting $retweeted_id gives bad or missing author object\n";
-	    last RETWEETED_IF;
-	}
-	my $retweeted_author_screen_name = $rtwd->{"core"}->{"user_results"}->{"result"}->{"legacy"}->{"screen_name"};
-	unless ( defined($retweeted_author_screen_name) ) {
-	    print STDERR "tweet $id retweeting $retweeted_id gives no author screen name\n";
-	    last RETWEETED_IF;
-	}
-    }}
+    my $retweeted_id;
+    # Sadly, not present in tweets.js (so this will always give undef):
+    $retweeted_id = $rl->{"retweeted_status"}->{"id_str"};
+    # $retweeted_author_id, $retweeted_author_screen_name are set below.
     ## Quoted
-    my $quoted_r;
-    my ($quoted_id, $quoted_author_id, $quoted_author_screen_name);
-    $quoted_id = $rl->{"quoted_status_id_str"};
-    my $quoted_permalink = $rl->{"quoted_status_permalink"}->{"expanded"};
-    if ( defined($quoted_id) ) {QUOTED_IF:{
-	my $qtwd = $r->{"quoted_status_result"}->{"result"};
-	# if ( defined($qtwd)
-	#      && defined($qtwd->{"__typename"})
-	#      && ($qtwd->{"__typename"} eq "TweetTombstone") ) {
-	#     last QUOTED_IF;
-	# }
-	unless ( defined($qtwd)
-		 && defined($qtwd->{"__typename"})
-		 && ($qtwd->{"__typename"} eq "Tweet") ) {
-	    last QUOTED_IF;
-	}
-	unless ( defined($qtwd->{"rest_id"})
-		 && ($qtwd->{"rest_id"} eq $quoted_id) ) {
-	    print STDERR "tweet $id quoting another does not give quoted id\n";
-	    last QUOTED_IF;
-	}
-	$quoted_r = $qtwd;
-	my $qtwdl = $qtwd->{"legacy"};
-	$quoted_author_id = $qtwdl->{"user_id_str"};
-	unless ( defined($quoted_author_id) ) {
-	    print STDERR "tweet $id quoting $quoted_id gives no author id\n";
-	    last QUOTED_IF;
-	}
-	unless ( defined($qtwd->{"core"}->{"user_results"}->{"result"})
-		 && defined($qtwd->{"core"}->{"user_results"}->{"result"}->{"__typename"})
-		 && ($qtwd->{"core"}->{"user_results"}->{"result"}->{"__typename"} eq "User")
-		 && defined($qtwd->{"core"}->{"user_results"}->{"result"}->{"rest_id"})
-		 && ($qtwd->{"core"}->{"user_results"}->{"result"}->{"rest_id"} eq $quoted_author_id) ) {
-	    print STDERR "tweet $id quoting $quoted_id gives bad or missing author object\n";
-	    last QUOTED_IF;
-	}
-	my $quoted_author_screen_name = $qtwd->{"core"}->{"user_results"}->{"result"}->{"legacy"}->{"screen_name"};
-	unless ( defined($quoted_author_screen_name) ) {
-	    print STDERR "tweet $id quoting $quoted_id gives no author screen name\n";
-	    last QUOTED_IF;
-	}
-    }}
+    # Will be filled by substitutions:
+    my ($quoted_id, $quoted_author_screen_name);
     ## Text
     my $full_text = $rl->{"full_text"};
     unless ( defined($full_text) ) {
@@ -337,7 +224,6 @@ sub record_tweet {
 	  last SUBSTITUTE;
       }
       my @substitutions;
-      my $found_quoted_permalink_in_entities = 0;
       unless ( defined($rl->{"entities"}) ) {
 	  print STDERR "tweet $id has no entities part\n";
 	  last SUBSTITUTE;
@@ -346,11 +232,13 @@ sub record_tweet {
 	  for my $ent ( @{$rl->{"entities"}->{"urls"}} ) {
 	      my $idx0 = $ent->{"indices"}->[0];
 	      my $idx1 = $ent->{"indices"}->[1];
-	      push @substitutions, [$idx0, $idx1-$idx0, $ent->{"url"}, html_quote($ent->{"expanded_url"})];
-	      if ( defined($quoted_permalink)
-		   && $quoted_permalink eq $ent->{"expanded_url"} ) {
-		  $found_quoted_permalink_in_entities = 1;
+	      if ( $ent->{"expanded_url"} =~ /\Ahttps?\:\/\/(?:mobile\.)?twitter\.com\/([A-Za-z0-9\_]+)\/status\/([0-9]+)\z/ ) {
+		  $quoted_id = $2;
+		  $quoted_author_screen_name = $1;
+	      } elsif ( $ent->{"expanded_url"} =~ /\Ahttps?\:\/\/(?:mobile\.)?twitter\.com\/i\/web\/status\/([0-9]+)\z/ ) {
+		  $quoted_id = $1;
 	      }
+	      push @substitutions, [$idx0, $idx1-$idx0, $ent->{"url"}, html_quote($ent->{"expanded_url"})];
 	  }
       }
       if ( defined($rl->{"extended_entities"}->{"media"}) ) {
@@ -366,44 +254,38 @@ sub record_tweet {
 	  }
       }
       $input_text = substitute_in_string $input_text, \@substitutions;
-      # If the permalink of the quoted tweet was not found in the URLs
-      # being substituted, add it explicitly at the end.
-      if ( defined($quoted_permalink)
-	   && ! $found_quoted_permalink_in_entities ) {
-	  $input_text .= (($input_text=~m/\s\z/)?"":" ") . $quoted_permalink;
-      }
       $input_text = html_unquote $input_text;
     }
     ## Miscellaneous
     my $lang = $rl->{"lang"};
     my $favorite_count = $rl->{"favorite_count"};
     my $retweet_count = $rl->{"retweet_count"};
-    my $quote_count = $rl->{"quote_count"};
-    my $reply_count = $rl->{"reply_count"};
+    # my $quote_count = $rl->{"quote_count"};
+    # my $reply_count = $rl->{"reply_count"};
     ## Insert
     my $sth = $weak ? $weak_insert_tweet_sth : $insert_tweet_sth;
     $sth->bind_param(1, $id, { pg_type => PG_TEXT });
     $sth->bind_param(2, $created_at, { pg_type => PG_TIMESTAMPTZ });
     $sth->bind_param(3, $author_id, { pg_type => PG_TEXT });
     $sth->bind_param(4, $author_screen_name, { pg_type => PG_TEXT });
-    $sth->bind_param(5, $conversation_id, { pg_type => PG_TEXT });
-    $sth->bind_param(6, $thread_id, { pg_type => PG_TEXT });
+    $sth->bind_param(5, undef, { pg_type => PG_TEXT });
+    $sth->bind_param(6, undef, { pg_type => PG_TEXT });
     $sth->bind_param(7, $replyto_id, { pg_type => PG_TEXT });
     $sth->bind_param(8, $replyto_author_id, { pg_type => PG_TEXT });
     $sth->bind_param(9, $replyto_author_screen_name, { pg_type => PG_TEXT });
     $sth->bind_param(10, $retweeted_id, { pg_type => PG_TEXT });
-    $sth->bind_param(11, $retweeted_author_id, { pg_type => PG_TEXT });
-    $sth->bind_param(12, $retweeted_author_screen_name, { pg_type => PG_TEXT });
+    $sth->bind_param(11, undef, { pg_type => PG_TEXT });
+    $sth->bind_param(12, undef, { pg_type => PG_TEXT });
     $sth->bind_param(13, $quoted_id, { pg_type => PG_TEXT });
-    $sth->bind_param(14, $quoted_author_id, { pg_type => PG_TEXT });
+    $sth->bind_param(14, undef, { pg_type => PG_TEXT });
     $sth->bind_param(15, $quoted_author_screen_name, { pg_type => PG_TEXT });
     $sth->bind_param(16, $full_text, { pg_type => PG_TEXT });
     $sth->bind_param(17, $input_text, { pg_type => PG_TEXT });
     $sth->bind_param(18, $lang, { pg_type => PG_TEXT });
     $sth->bind_param(19, $favorite_count, SQL_INTEGER);
     $sth->bind_param(20, $retweet_count, SQL_INTEGER);
-    $sth->bind_param(21, $quote_count, SQL_INTEGER);
-    $sth->bind_param(22, $reply_count, SQL_INTEGER);
+    $sth->bind_param(21, undef, SQL_INTEGER);
+    $sth->bind_param(22, undef, SQL_INTEGER);
     $sth->bind_param(23, $orig, { pg_type => PG_TEXT });
     $sth->bind_param(24, $global_source, { pg_type => PG_TEXT });
     $sth->execute();
@@ -411,15 +293,12 @@ sub record_tweet {
     my $media_lst_r = ($rl->{"extended_entities"}->{"media"}) // ($rl->{"entities"}->{"media"});
     if ( defined($media_lst_r) && ref($media_lst_r) eq "ARRAY" ) {
 	foreach my $media_r ( @{$media_lst_r} ) {
-	    record_media($media_r, $weak, $id);
+	    record_media_v1($media_r, $weak, $id);
 	}
     }
-    record_user($author_r, $weak) if defined($author_r);
-    record_tweet($retweeted_r, 1) if defined($retweeted_r);
-    record_tweet($quoted_r, 1) if defined($quoted_r);
 }
 
-sub record_media {
+sub record_media_v1 {
     # Insert media entry into database.  Arguments are the ref to the
     # media entry's (decoded) JSON, a weak parameter indicating
     # whether we should leave existing entries, and the id of the
@@ -455,6 +334,7 @@ sub record_media {
 	print STDERR "media $id has no type: aborting\n";
 	return;
     }
+    # Sadly, not present in tweets.js (so this will always give undef):
     my $alt_text = $r->{"ext_alt_text"};
     ## Insert
     my $sth = $weak ? $weak_insert_media_sth : $insert_media_sth;
@@ -470,124 +350,36 @@ sub record_media {
     $sth->execute();
 }
 
-sub record_user {
-    # Insert user into database.  Arguments are the ref to the user's
-    # (decoded) JSON, and a weak parameter indicating whether we
-    # should leave existing entries.
-    my $r = shift;
-    my $weak = shift || $global_weak;  # If 1 leave existing records be
-    my $orig = encode_json($r);
-    ## Basic stuff
-    my $id = $r->{"rest_id"};
-    unless ( defined($id) ) {
-	print STDERR "user has no id: aborting\n";
-	return;
-    }
-    unless ( $id =~ m/\A[0-9]+\z/ ) {
-	print STDERR "user has badly formed id: aborting\n";
-	return;
-    }
-    my $rl = $r->{"legacy"};
-    unless ( defined($rl) && ref($rl) eq "HASH" ) {
-	print STDERR "user $id has no legacy field: aborting\n";
-	return;
-    }
-    my $created_at_str = $rl->{"created_at"};
-    unless ( defined($created_at_str) ) {
-	print STDERR "user $id has no creation date: aborting\n";
-	return;
-    }
-    my $created_at = $datetime_parser->parse_datetime($created_at_str);
-    unless ( defined($created_at) ) {
-	print STDERR "user $id has invalid creation date: aborting\n";
-	return;
-    }
-    my $screen_name = $rl->{"screen_name"};
-    my $full_name = $rl->{"name"};
-    ## Description
-    my $profile_description = $rl->{"description"};
-    my $profile_input_description;
-    if ( defined($profile_description) ) {SUBSTITUTE:{
-	$profile_input_description = $profile_description;
-	my @substitutions;
-	unless ( defined($rl->{"entities"}->{"description"}) ) {
-	    print STDERR "user $id has no entities part\n";
-	    last SUBSTITUTE;
-	}
-	for my $ent ( @{$rl->{"entities"}->{"description"}->{"urls"}} ) {
-	    my $idx0 = $ent->{"indices"}->[0];
-	    my $idx1 = $ent->{"indices"}->[1];
-	    # NO html_quote here (the description is NOT html-encoded)
-	    push @substitutions, [$idx0, $idx1-$idx0, $ent->{"url"}, $ent->{"expanded_url"}];
-	}
-	$profile_input_description = substitute_in_string $profile_input_description, \@substitutions;
-    }}
-    ## Miscellaneous
-    my $profile_url = $rl->{"entities"}->{"url"}->{"urls"}->[0]->{"expanded_url"};
-    my $pinned_id = $rl->{"pinned_tweet_ids_str"}->[0];
-    my $followers_count = $rl->{"followers_count"};
-    my $following_count = $rl->{"friends_count"};
-    my $statuses_count = $rl->{"statuses_count"};
-    ## Insert
-    my $sth = $weak ? $weak_insert_user_sth : $insert_user_sth;
-    $sth->bind_param(1, $id, { pg_type => PG_TEXT });
-    $sth->bind_param(2, $created_at, { pg_type => PG_TIMESTAMPTZ });
-    $sth->bind_param(3, $screen_name, { pg_type => PG_TEXT });
-    $sth->bind_param(4, $full_name, { pg_type => PG_TEXT });
-    $sth->bind_param(5, $profile_description, { pg_type => PG_TEXT });
-    $sth->bind_param(6, $profile_input_description, { pg_type => PG_TEXT });
-    $sth->bind_param(7, $profile_url, { pg_type => PG_TEXT });
-    $sth->bind_param(8, $pinned_id, { pg_type => PG_TEXT });
-    $sth->bind_param(9, $followers_count, SQL_INTEGER);
-    $sth->bind_param(10, $following_count, SQL_INTEGER);
-    $sth->bind_param(11, $statuses_count, SQL_INTEGER);
-    $sth->bind_param(12, $orig, { pg_type => PG_TEXT });
-    $sth->bind_param(13, $global_source, { pg_type => PG_TEXT });
-    $sth->execute();
+if ( scalar(@ARGV) != 1 ) {
+    die "please run this program with a single argument pointing to the tweets.js file from a Twitter data archive";
 }
 
-sub generic_recurse {
-    # Recurse into JSON structure, calling record_tweet or record_user
-    # on whatever looks like it should be inserted.
-    my $r = shift;
-    if ( ref($r) eq "ARRAY" ) {
-	for ( my $i=0 ; $i<scalar(@{$r}) ; $i++ ) {
-	    generic_recurse ($r->[$i]);
+open my $f, "<", $ARGV[0] or die "can't open $ARGV[0]: $!";
+
+my $part;
+my $content;
+while ($_ = <$f>) {
+    if ( $_ =~ m/^window\.YTD\.tweets\.part(\S+)\s*\=\s*\[\s*/ ) {
+	$part = $1;
+	$content = "[\n";
+	printf STDERR "part %s starts\n", $part;
+    } elsif ( $_ =~ m/^\]\s*$/ ) {
+	die "bad format" unless defined($part);
+	$content .= "]\n";
+	my $data = decode_json $content;
+	die "unexpected content" unless ref($data) eq "ARRAY";
+	printf STDERR "%d tweets found in part %s of archive\n", scalar(@{$data}), $part;
+	foreach my $ent ( @{$data} ) {
+	    if ( defined($ent->{"tweet"}) ) {
+		record_tweet_v1 $ent->{"tweet"}, 0;
+	    } else {
+		printf STDERR "array item doesn't have key \"tweet\", skipping";
+	    }
 	}
-    } elsif ( ref($r) eq "HASH" ) {
-	if ( defined($r->{"__typename"}) && $r->{"__typename"} eq "Tweet"
-	     && defined($r->{"rest_id"}) ) {
-	    record_tweet($r, 0);
-	    return;  # Recusion is done inside record_tweet
-	}
-	if ( defined($r->{"__typename"}) && $r->{"__typename"} eq "User"
-	     && defined($r->{"rest_id"}) ) {
-	    record_user($r, 0);
-	    return;
-	}
-	foreach my $k ( keys(%{$r}) ) {
-	    generic_recurse ($r->{$k});
-	}
+    } else {
+	die "bad format" unless defined($part);
+	$content .= $_;
     }
 }
 
-sub process_content {
-    my $content = shift;
-    my $data = decode_json $content;
-    generic_recurse $data;
-}
-
-if ( scalar(@ARGV) ) {
-    foreach my $fname ( @ARGV ) {
-	open my $f, "<", $fname
-	    or die "can't open $fname: $!";
-	local $/ = undef;  # enable localized slurp mode
-	my $content = <$f>;
-	process_content $content;
-	close $f;
-    }
-} else {
-    local $/ = undef;  # enable localized slurp mode
-    my $content = <STDIN>;
-    process_content $content;
-}
+close $f;
