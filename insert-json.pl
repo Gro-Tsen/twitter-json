@@ -58,10 +58,13 @@ sub substitute_in_string {
     my $minbar = 0;
     for my $sb ( @subs ) {
 	my $idx0 = $sb->[0] + $corr;
-	die "Attempting to overlap substitutions" unless $idx0>=$minbar;
+	unless ( $idx0>=$minbar ) {
+	    print STDERR "substitute_in_string: attempting to overlap substitutions\n";
+	    next;
+	}
 	my $len = $sb->[1];
 	if ( defined($sb->[2]) ) {
-	    die(sprintf("Bad calibration: expecting \"%s\", got \"%s\"\n", $sb->[2], substr($str, $idx0, $len))) unless substr($str, $idx0, $len) eq $sb->[2];
+	    print STDERR (sprintf("substitute_in_string: verification failed: expecting \"%s\", got \"%s\"\n", $sb->[2], substr($str, $idx0, $len))) unless substr($str, $idx0, $len) eq $sb->[2];
 	}
 	my $repl = ($sb->[4] // "") . ($sb->[3] // substr($str, $idx0, $len)) . ($sb->[5] // "");
 	my $newlen = length($repl);
