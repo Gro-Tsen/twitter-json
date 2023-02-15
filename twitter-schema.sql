@@ -17,7 +17,7 @@ CREATE TABLE tweets (
        /* == ["core"]["user_results"]["result"]["rest_id"] */
        author_id text NOT NULL ,
        /* ["core"]["user_results"]["result"]["legacy"]["screen_name"] */
-       author_screen_name text NOT NULL ,
+       author_screen_name text ,
        /* ["legacy"]["conversation_id_str"] */
        conversation_id text ,
        /* ["legacy"]["self_thread"]["id_str"] */

@@ -210,8 +210,8 @@ sub record_tweet_v1 {
 	return;
     }
     my $created_at_iso = $created_at->strftime("%Y-%m-%d %H:%M:%S+00:00");
-    my $author_id = $rl->{"user"}->{"id_str"} // $global_user_id;
-    my $author_screen_name = $rl->{"user"}->{"screen_name"} // $global_user_screen_name;
+    my $author_id = $rl->{"user_id_str"} // $rl->{"user"}->{"id_str"} // $global_user_id;
+    my $author_screen_name = $rl->{"user_screen_name"} // $rl->{"user"}->{"screen_name"} // $global_user_screen_name;
     ## Replyto
     my ($replyto_id, $replyto_author_id, $replyto_author_screen_name);
     $replyto_id = $rl->{"in_reply_to_status_id_str"};
@@ -226,13 +226,14 @@ sub record_tweet_v1 {
     ## Retweeted
     my $retweeted_id;
     # Sadly, not present in tweets.js (so this will always give undef):
-    $retweeted_id = $rl->{"retweeted_status"}->{"id_str"};
+    $retweeted_id = $rl->{"retweeted_status_id_str"} // $rl->{"retweeted_status"}->{"id_str"};
     # $retweeted_author_id, $retweeted_author_screen_name are set below.
     ## Quoted
-    # Will be filled by substitutions:
     my ($quoted_id, $quoted_author_screen_name);
+    $quoted_id = $rl->{"quoted_status_id_str"};
     ## Text
     my $full_text = $rl->{"full_text"};
+    my $media_lst_r = ($rl->{"extended_entities"}->{"media"}) // ($rl->{"entities"}->{"media"});
     unless ( defined($full_text) ) {
 	print STDERR "tweet $id has no text: aborting\n";
 	return;
@@ -264,9 +265,9 @@ sub record_tweet_v1 {
 	      push @substitutions, [$idx0, $idx1-$idx0, $ent->{"url"}, html_quote($ent->{"expanded_url"})];
 	  }
       }
-      if ( defined($rl->{"extended_entities"}->{"media"}) ) {
+      if ( defined($media_lst_r) ) {
 	  my $previdx0;
-	  for my $ent ( @{$rl->{"entities"}->{"media"}} ) {
+	  for my $ent ( @{$media_lst_r} ) {
 	      my $idx0 = $ent->{"indices"}->[0];
 	      my $idx1 = $ent->{"indices"}->[1];
 	      # Multiple media entities may subtitute the same part of
@@ -327,15 +328,14 @@ sub record_tweet_v1 {
     die "something went very wrong" unless $weak || ($ret->[0][1] eq $meta_date);
     $dbh->commit;
     ## Process media, author, and retweeted or quoted tweet
-    my $media_lst_r = ($rl->{"extended_entities"}->{"media"}) // ($rl->{"entities"}->{"media"});
     if ( defined($media_lst_r) && ref($media_lst_r) eq "ARRAY" ) {
 	foreach my $media_r ( @{$media_lst_r} ) {
-	    record_media_v1($media_r, $weak, $id);
+	    record_media($media_r, $weak, $id);
 	}
     }
 }
 
-sub record_media_v1 {
+sub record_media {
     # Insert media entry into database.  Arguments are the ref to the
     # media entry's (decoded) JSON, a weak parameter indicating
     # whether we should leave existing entries, and the id of the
