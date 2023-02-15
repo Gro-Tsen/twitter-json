@@ -1,8 +1,16 @@
 SET TIME ZONE 'GMT' ;
+CREATE TABLE authority (
+       id text NOT NULL ,
+       orig json NOT NULL ,
+       meta_inserted_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP ,
+       meta_updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP ,
+       meta_source text NOT NULL ,
+       CONSTRAINT authority_meta_source_id_key UNIQUE ( meta_source , id )
+) ;
 CREATE TABLE tweets (
        /* ["rest_id"] */
        /* == ["legacy"]["id_str"] */
-       id text PRIMARY KEY ,  
+       id text PRIMARY KEY ,
        /* ["legacy"]["created_at"] */
        created_at timestamp with time zone NOT NULL ,
        /* ["legacy"]["user_id_str"] */
@@ -49,8 +57,6 @@ CREATE TABLE tweets (
        quote_count int ,
        /* ["legacy"]["reply_count"] */
        reply_count int ,
-       /* with ["__itemType"]=="Tweet" */
-       orig json NOT NULL ,
        meta_inserted_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP ,
        meta_updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP ,
        meta_source text NOT NULL
@@ -70,8 +76,6 @@ CREATE TABLE media (
        media_type text NOT NULL ,
        /* ["ext_alt_text"] */
        alt_text text ,
-       /* with ["display_url"] */
-       orig json NOT NULL ,
        meta_inserted_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP ,
        meta_updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP ,
        meta_source text NOT NULL
@@ -99,12 +103,12 @@ CREATE TABLE users (
        following_count int ,
        /* ["legacy"]["statuses_count"] */
        statuses_count int ,
-       /* with ["__itemType"]=="User" */
-       orig json NOT NULL ,
        meta_inserted_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP ,
        meta_updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP ,
        meta_source text NOT NULL
 ) ;
+/* CREATE UNIQUE INDEX authority_source_id ON authority ( meta_source , id ) ; */
+CREATE INDEX authority_id_key ON authority ( id ) ;
 CREATE INDEX tweets_author_key ON tweets ( author_id ) ;
 CREATE INDEX tweets_author_screen_name_key ON tweets ( author_screen_name ) ;
 CREATE INDEX tweets_conversation_key ON tweets ( conversation_id ) ;

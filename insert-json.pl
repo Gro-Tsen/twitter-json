@@ -19,6 +19,11 @@ my $har_mode = $opts{h};
 my $global_weak = $opts{w};
 my $global_source = $opts{s} // "json-feed";
 
+my $json_coder_unicode = JSON::XS->new;
+my $json_decoder_unicode = JSON::XS->new;
+my $json_coder_utf8 = JSON::XS->new->utf8;
+my $json_decoder_utf8 = JSON::XS->new->utf8;
+
 # binmode STDOUT, ":utf8";
 
 sub html_quote {
@@ -82,6 +87,8 @@ my $datetime_parser = DateTime::Format::Strptime->new(
 
 my $dbname = "twitter";
 my $dbh;  # Connection to database
+my $insert_authority_sth;
+my $weak_insert_authority_sth;
 my $insert_tweet_sth;
 my $weak_insert_tweet_sth;
 my $insert_media_sth;
@@ -95,7 +102,21 @@ sub do_connect {
     die ("Can't connect to database: " . $DBI::errstr . "\n") unless $dbh;
     $dbh->do("SET TIME ZONE 0");
     die ("Can't set timezone: " . $dbh->errstr . "\n") if $dbh->err;
-    my $command = "INSERT INTO tweets "
+    # Prepare command to insert into "authority" table:
+    my $command = "INSERT INTO authority "
+	. "( id , orig , meta_updated_at , meta_inserted_at , meta_source ) "
+	. "VALUES ( ?,?::json,?,?,? ) ";
+    my $conflict = "ON CONFLICT ON CONSTRAINT authority_meta_source_id_key DO UPDATE SET "
+	. "id = EXCLUDED.id "
+	. ", orig = EXCLUDED.orig "
+	. ", meta_updated_at = EXCLUDED.meta_updated_at "
+	. ", meta_source = EXCLUDED.meta_source ";
+    my $noconflict = "ON CONFLICT ON CONSTRAINT authority_meta_source_id_key DO NOTHING ";
+    my $returning = "RETURNING id , meta_updated_at";
+    $insert_authority_sth = $dbh->prepare($command . $conflict . $returning);
+    $weak_insert_authority_sth = $dbh->prepare($command . $noconflict . $returning);
+    # Prepare command to insert into "tweets" table:
+    $command = "INSERT INTO tweets "
 	. "( id , created_at , author_id , author_screen_name "
 	. ", conversation_id , thread_id "
 	. ", replyto_id , replyto_author_id , replyto_author_screen_name "
@@ -103,9 +124,9 @@ sub do_connect {
 	. ", quoted_id , quoted_author_id , quoted_author_screen_name "
 	. ", full_text , input_text , lang "
 	. ", favorite_count , retweet_count , quote_count , reply_count "
-	. ", orig , meta_source ) "
-	. "VALUES ( ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::json,? ) ";
-    my $conflict = "ON CONFLICT ( id ) DO UPDATE SET "
+	. ", meta_source ) "
+	. "VALUES ( ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? ) ";
+    $conflict = "ON CONFLICT ( id ) DO UPDATE SET "
 	. "id = EXCLUDED.id "
 	. ", created_at = EXCLUDED.created_at "
 	. ", author_id = EXCLUDED.author_id "
@@ -128,18 +149,18 @@ sub do_connect {
 	. ", retweet_count = COALESCE(EXCLUDED.retweet_count, tweets.retweet_count) "
 	. ", quote_count = COALESCE(EXCLUDED.quote_count, tweets.quote_count) "
 	. ", reply_count = COALESCE(EXCLUDED.reply_count, tweets.reply_count) "
-	. ", orig = EXCLUDED.orig "
-	. ", meta_updated_at = now() "
+	. ", meta_updated_at = EXCLUDED.meta_updated_at "
 	. ", meta_source = EXCLUDED.meta_source ";
-    my $noconflict = "ON CONFLICT ( id ) DO NOTHING ";
-    my $returning = "RETURNING id";
+    $noconflict = "ON CONFLICT ( id ) DO NOTHING ";
+    $returning = "RETURNING id , meta_updated_at";
     $insert_tweet_sth = $dbh->prepare($command . $conflict . $returning);
     $weak_insert_tweet_sth = $dbh->prepare($command . $noconflict . $returning);
+    # Prepare command to insert into "media" table:
     $command = "INSERT INTO media "
 	. "( id , parent_id , short_url , display_url "
 	. ", media_url , media_type , alt_text "
-	. ", orig , meta_source ) "
-	. "VALUES ( ?,?,?,?,?,?,?,?::json,? ) ";
+	. ", meta_source ) "
+	. "VALUES ( ?,?,?,?,?,?,?,? ) ";
     $conflict = "ON CONFLICT ( id ) DO UPDATE SET "
 	. "id = EXCLUDED.id "
 	. ", parent_id = EXCLUDED.parent_id "
@@ -148,17 +169,17 @@ sub do_connect {
 	. ", media_url = COALESCE(EXCLUDED.media_url, media.media_url) "
 	. ", media_type = EXCLUDED.media_type "
 	. ", alt_text = COALESCE(EXCLUDED.alt_text, media.alt_text) "
-	. ", orig = EXCLUDED.orig "
-	. ", meta_updated_at = now() "
+	. ", meta_updated_at = EXCLUDED.meta_updated_at "
 	. ", meta_source = EXCLUDED.meta_source ";
     $insert_media_sth = $dbh->prepare($command . $conflict . $returning);
     $weak_insert_media_sth = $dbh->prepare($command . $noconflict . $returning);
+    # Prepare command to insert into "users" table:
     $command = "INSERT INTO users "
 	. "( id , created_at , screen_name , full_name "
 	. ", profile_description , profile_input_description , profile_url "
 	. ", pinned_id , followers_count , following_count , statuses_count "
-	. ", orig , meta_source ) "
-	. "VALUES ( ?,?,?,?,?,?,?,?,?,?,?,?::json,? ) ";
+	. ", meta_source ) "
+	. "VALUES ( ?,?,?,?,?,?,?,?,?,?,?,? ) ";
     $conflict = "ON CONFLICT ( id ) DO UPDATE SET "
 	. "id = EXCLUDED.id "
 	. ", created_at = EXCLUDED.created_at "
@@ -171,8 +192,7 @@ sub do_connect {
 	. ", followers_count = COALESCE(EXCLUDED.followers_count, users.followers_count) "
 	. ", following_count = COALESCE(EXCLUDED.following_count, users.following_count) "
 	. ", statuses_count = COALESCE(EXCLUDED.statuses_count, users.statuses_count) "
-	. ", orig = EXCLUDED.orig "
-	. ", meta_updated_at = now() "
+	. ", meta_updated_at = EXCLUDED.meta_updated_at "
 	. ", meta_source = EXCLUDED.meta_source ";
     $insert_user_sth = $dbh->prepare($command . $conflict . $returning);
     $weak_insert_user_sth = $dbh->prepare($command . $noconflict . $returning);
@@ -186,7 +206,7 @@ sub record_tweet {
     # we should leave existing entries.
     my $r = shift;
     my $weak = shift || $global_weak;  # If 1 leave existing records be
-    my $orig = encode_json($r);
+    my $orig = $json_coder_unicode->encode($r);
     ## Basic stuff
     my $id = $r->{"rest_id"};
     unless ( defined($id) ) {
@@ -386,6 +406,7 @@ sub record_tweet {
     my $quote_count = $rl->{"quote_count"};
     my $reply_count = $rl->{"reply_count"};
     ## Insert
+    $dbh->{AutoCommit} = 0;
     my $sth = $weak ? $weak_insert_tweet_sth : $insert_tweet_sth;
     $sth->bind_param(1, $id, { pg_type => PG_TEXT });
     $sth->bind_param(2, $created_at, { pg_type => PG_TIMESTAMPTZ });
@@ -409,9 +430,22 @@ sub record_tweet {
     $sth->bind_param(20, $retweet_count, SQL_INTEGER);
     $sth->bind_param(21, $quote_count, SQL_INTEGER);
     $sth->bind_param(22, $reply_count, SQL_INTEGER);
-    $sth->bind_param(23, $orig, { pg_type => PG_TEXT });
-    $sth->bind_param(24, $global_source, { pg_type => PG_TEXT });
+    $sth->bind_param(23, $global_source, { pg_type => PG_TEXT });
     $sth->execute();
+    my $ret = $sth->fetchall_arrayref;
+    die "something went very wrong" unless $weak || ($ret->[0][0] eq $id);
+    my $meta_date = $ret->[0][1] // "now";
+    $sth = $weak ? $weak_insert_authority_sth : $insert_authority_sth;
+    $sth->bind_param(1, $id, { pg_type => PG_TEXT });
+    $sth->bind_param(2, $orig, { pg_type => PG_TEXT });
+    $sth->bind_param(3, $meta_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(4, $meta_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(5, $global_source, { pg_type => PG_TEXT });
+    $sth->execute();
+    $ret = $sth->fetchall_arrayref;
+    die "something went very wrong" unless $weak || ($ret->[0][0] eq $id);
+    die "something went very wrong" unless $weak || ($ret->[0][1] eq $meta_date);
+    $dbh->commit;
     ## Process media, author, and retweeted or quoted tweet
     my $media_lst_r = ($rl->{"extended_entities"}->{"media"}) // ($rl->{"entities"}->{"media"});
     if ( defined($media_lst_r) && ref($media_lst_r) eq "ARRAY" ) {
@@ -432,7 +466,7 @@ sub record_media {
     my $r = shift;
     my $weak = shift || $global_weak;  # If 1 leave existing records be
     my $caller_id = shift;
-    my $orig = encode_json($r);
+    my $orig = $json_coder_unicode->encode($r);
     ## Basic stuff
     my $id = $r->{"id_str"};
     unless ( defined($id) ) {
@@ -462,6 +496,7 @@ sub record_media {
     }
     my $alt_text = $r->{"ext_alt_text"};
     ## Insert
+    $dbh->{AutoCommit} = 0;
     my $sth = $weak ? $weak_insert_media_sth : $insert_media_sth;
     $sth->bind_param(1, $id, { pg_type => PG_TEXT });
     $sth->bind_param(2, $parent_id, { pg_type => PG_TEXT });
@@ -470,9 +505,22 @@ sub record_media {
     $sth->bind_param(5, $media_url, { pg_type => PG_TEXT });
     $sth->bind_param(6, $media_type, { pg_type => PG_TEXT });
     $sth->bind_param(7, $alt_text, { pg_type => PG_TEXT });
-    $sth->bind_param(8, $orig, { pg_type => PG_TEXT });
-    $sth->bind_param(9, $global_source, { pg_type => PG_TEXT });
+    $sth->bind_param(8, $global_source, { pg_type => PG_TEXT });
     $sth->execute();
+    my $ret = $sth->fetchall_arrayref;
+    die "something went very wrong" unless $weak || ($ret->[0][0] eq $id);
+    my $meta_date = $ret->[0][1] // "now";
+    $sth = $weak ? $weak_insert_authority_sth : $insert_authority_sth;
+    $sth->bind_param(1, $id, { pg_type => PG_TEXT });
+    $sth->bind_param(2, $orig, { pg_type => PG_TEXT });
+    $sth->bind_param(3, $meta_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(4, $meta_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(5, $global_source, { pg_type => PG_TEXT });
+    $sth->execute();
+    $ret = $sth->fetchall_arrayref;
+    die "something went very wrong" unless $weak || ($ret->[0][0] eq $id);
+    die "something went very wrong" unless $weak || ($ret->[0][1] eq $meta_date);
+    $dbh->commit;
 }
 
 sub record_user {
@@ -481,7 +529,7 @@ sub record_user {
     # should leave existing entries.
     my $r = shift;
     my $weak = shift || $global_weak;  # If 1 leave existing records be
-    my $orig = encode_json($r);
+    my $orig = $json_coder_unicode->encode($r);
     ## Basic stuff
     my $id = $r->{"rest_id"};
     unless ( defined($id) ) {
@@ -534,6 +582,7 @@ sub record_user {
     my $following_count = $rl->{"friends_count"};
     my $statuses_count = $rl->{"statuses_count"};
     ## Insert
+    $dbh->{AutoCommit} = 0;
     my $sth = $weak ? $weak_insert_user_sth : $insert_user_sth;
     $sth->bind_param(1, $id, { pg_type => PG_TEXT });
     $sth->bind_param(2, $created_at, { pg_type => PG_TIMESTAMPTZ });
@@ -546,9 +595,22 @@ sub record_user {
     $sth->bind_param(9, $followers_count, SQL_INTEGER);
     $sth->bind_param(10, $following_count, SQL_INTEGER);
     $sth->bind_param(11, $statuses_count, SQL_INTEGER);
-    $sth->bind_param(12, $orig, { pg_type => PG_TEXT });
-    $sth->bind_param(13, $global_source, { pg_type => PG_TEXT });
+    $sth->bind_param(12, $global_source, { pg_type => PG_TEXT });
     $sth->execute();
+    my $ret = $sth->fetchall_arrayref;
+    die "something went very wrong" unless $weak || ($ret->[0][0] eq $id);
+    my $meta_date = $ret->[0][1] // "now";
+    $sth = $weak ? $weak_insert_authority_sth : $insert_authority_sth;
+    $sth->bind_param(1, $id, { pg_type => PG_TEXT });
+    $sth->bind_param(2, $orig, { pg_type => PG_TEXT });
+    $sth->bind_param(3, $meta_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(4, $meta_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(5, $global_source, { pg_type => PG_TEXT });
+    $sth->execute();
+    $ret = $sth->fetchall_arrayref;
+    die "something went very wrong" unless $weak || ($ret->[0][0] eq $id);
+    die "something went very wrong" unless $weak || ($ret->[0][1] eq $meta_date);
+    $dbh->commit;
 }
 
 sub generic_recurse {
@@ -578,7 +640,7 @@ sub generic_recurse {
 
 sub process_content {
     my $content = shift;
-    my $data = decode_json $content;
+    my $data = $json_decoder_utf8->decode($content);
     if ( $har_mode ) {
 	die "bad HAR format"
 	    unless defined($data->{"log"}->{"entries"})
@@ -589,7 +651,7 @@ sub process_content {
 		 && ( $ent->{"response"}->{"content"}->{"mimeType"}
 		      =~ m/^application\/json(?:\;|$)/ ) ) {
 		my $subcontent = $ent->{"response"}->{"content"}->{"text"};
-		my $subdata = JSON::XS->new->decode($subcontent);
+		my $subdata = $json_decoder_unicode->decode($subcontent);
 		generic_recurse $subdata;
 	    }
 	}
