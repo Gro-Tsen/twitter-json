@@ -93,6 +93,8 @@ my $insert_tweet_sth;
 my $weak_insert_tweet_sth;
 my $insert_media_sth;
 my $weak_insert_media_sth;
+my $insert_user_sth;
+my $weak_insert_user_sth;
 
 sub do_connect {
     # Connect to database and prepare insert statements.
@@ -171,6 +173,29 @@ sub do_connect {
 	. ", meta_source = EXCLUDED.meta_source ";
     $insert_media_sth = $dbh->prepare($command . $conflict . $returning);
     $weak_insert_media_sth = $dbh->prepare($command . $noconflict . $returning);
+    # Prepare command to insert into "users" table:
+    $command = "INSERT INTO users "
+	. "( id , created_at , screen_name , full_name "
+	. ", profile_description , profile_input_description , profile_url "
+	. ", pinned_id , followers_count , following_count , statuses_count "
+	. ", meta_source ) "
+	. "VALUES ( ?,?,?,?,?,?,?,?,?,?,?,? ) ";
+    $conflict = "ON CONFLICT ( id ) DO UPDATE SET "
+	. "id = EXCLUDED.id "
+	. ", created_at = EXCLUDED.created_at "
+	. ", screen_name = EXCLUDED.screen_name "
+	. ", full_name = COALESCE(EXCLUDED.full_name, users.full_name) "
+	. ", profile_description = COALESCE(EXCLUDED.profile_description, users.profile_description) "
+	. ", profile_input_description = COALESCE(EXCLUDED.profile_input_description, users.profile_input_description) "
+	. ", profile_url = COALESCE(EXCLUDED.profile_url, users.profile_url) "
+	. ", pinned_id = COALESCE(EXCLUDED.pinned_id, users.pinned_id) "
+	. ", followers_count = COALESCE(EXCLUDED.followers_count, users.followers_count) "
+	. ", following_count = COALESCE(EXCLUDED.following_count, users.following_count) "
+	. ", statuses_count = COALESCE(EXCLUDED.statuses_count, users.statuses_count) "
+	. ", meta_updated_at = EXCLUDED.meta_updated_at "
+	. ", meta_source = EXCLUDED.meta_source ";
+    $insert_user_sth = $dbh->prepare($command . $conflict . $returning);
+    $weak_insert_user_sth = $dbh->prepare($command . $noconflict . $returning);
 }
 
 do_connect;
@@ -209,7 +234,7 @@ sub record_tweet_v1 {
 	print STDERR "tweet $id has no author id: aborting\n";
 	return;
     }
-    my $author_screen_name = $rl->{"user_screen_name"} // $rl->{"user"}->{"screen_name"};
+    my $author_screen_name = $rl->{"user_screen_name"} // $rl->{"user"}->{"screen_name"} // $rl->{"users"}->{$author_id}->{"screen_name"};
     my $conversation_id = $rl->{"conversation_id_str"};
     my $thread_id = $rl->{"self_thread"}->{"id_str"};
     ## Replyto
@@ -312,7 +337,7 @@ sub record_tweet_v1 {
     $sth->bind_param(12, undef, { pg_type => PG_TEXT });
     $sth->bind_param(13, $quoted_id, { pg_type => PG_TEXT });
     $sth->bind_param(14, undef, { pg_type => PG_TEXT });
-    $sth->bind_param(15, undef, { pg_type => PG_TEXT });
+    $sth->bind_param(15, $quoted_author_screen_name, { pg_type => PG_TEXT });
     $sth->bind_param(16, $full_text, { pg_type => PG_TEXT });
     $sth->bind_param(17, $input_text, { pg_type => PG_TEXT });
     $sth->bind_param(18, $lang, { pg_type => PG_TEXT });
@@ -340,6 +365,23 @@ sub record_tweet_v1 {
     if ( defined($media_lst_r) && ref($media_lst_r) eq "ARRAY" ) {
 	foreach my $media_r ( @{$media_lst_r} ) {
 	    record_media($media_r, $weak, $id);
+	}
+    }
+    if ( defined($rl->{"user"}) ) {
+	my $author_r = $rl->{"user"};
+	if ( scalar(keys(%{$author_r})) ) {
+	    record_user_v1($author_r, $weak);
+	}
+    }
+    if ( defined($rl->{"users"}) ) {
+	my $rr = $rl->{"users"};
+	foreach my $k ( keys(%{$rr}) ) {
+	    if ( $k =~ m/\A[0-9]+\z/ ) {
+		next unless scalar(keys(%{$rr->{$k}}));
+		record_user_v1($rr->{$k}, $weak);
+	    } else {
+		print STDERR "ignoring nonsensical key $k in users structure\n";
+	    }
 	}
     }
 }
@@ -409,6 +451,92 @@ sub record_media {
     $dbh->commit;
 }
 
+sub record_user_v1 {
+    # Insert user into database.  Arguments are the ref to the user's
+    # (decoded) JSON, and a weak parameter indicating whether we
+    # should leave existing entries.
+    my $r = shift;
+    my $weak = shift || $global_weak;  # If 1 leave existing records be
+    my $orig = $json_coder_unicode->encode($r);
+    ## Basic stuff
+    my $id = $r->{"id_str"};
+    unless ( defined($id) ) {
+	print STDERR "user has no id: aborting\n";
+	return;
+    }
+    unless ( $id =~ m/\A[0-9]+\z/ ) {
+	print STDERR "user has badly formed id: aborting\n";
+	return;
+    }
+    my $rl = $r;  # Simplify synchronization with insert-json.pl
+    my $created_at_str = $rl->{"created_at"};
+    unless ( defined($created_at_str) ) {
+	print STDERR "user $id has no creation date: aborting\n";
+	return;
+    }
+    my $created_at = $datetime_parser->parse_datetime($created_at_str);
+    unless ( defined($created_at) ) {
+	print STDERR "user $id has invalid creation date: aborting\n";
+	return;
+    }
+    my $screen_name = $rl->{"screen_name"};
+    my $full_name = $rl->{"name"};
+    ## Description
+    my $profile_description = $rl->{"description"};
+    my $profile_input_description;
+    if ( defined($profile_description) ) {SUBSTITUTE:{
+	$profile_input_description = $profile_description;
+	my @substitutions;
+	unless ( defined($rl->{"entities"}->{"description"}) ) {
+	    print STDERR "user $id has no entities part\n";
+	    last SUBSTITUTE;
+	}
+	for my $ent ( @{$rl->{"entities"}->{"description"}->{"urls"}} ) {
+	    my $idx0 = $ent->{"indices"}->[0];
+	    my $idx1 = $ent->{"indices"}->[1];
+	    # NO html_quote here (the description is NOT html-encoded)
+	    push @substitutions, [$idx0, $idx1-$idx0, $ent->{"url"}, $ent->{"expanded_url"}];
+	}
+	$profile_input_description = substitute_in_string $profile_input_description, \@substitutions;
+    }}
+    ## Miscellaneous
+    my $profile_url = $rl->{"entities"}->{"url"}->{"urls"}->[0]->{"expanded_url"};
+    my $pinned_id = $rl->{"pinned_tweet_ids_str"}->[0];
+    my $followers_count = $rl->{"followers_count"};
+    my $following_count = $rl->{"friends_count"};
+    my $statuses_count = $rl->{"statuses_count"};
+    ## Insert
+    $dbh->{AutoCommit} = 0;
+    my $sth = $weak ? $weak_insert_user_sth : $insert_user_sth;
+    $sth->bind_param(1, $id, { pg_type => PG_TEXT });
+    $sth->bind_param(2, $created_at, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(3, $screen_name, { pg_type => PG_TEXT });
+    $sth->bind_param(4, $full_name, { pg_type => PG_TEXT });
+    $sth->bind_param(5, $profile_description, { pg_type => PG_TEXT });
+    $sth->bind_param(6, $profile_input_description, { pg_type => PG_TEXT });
+    $sth->bind_param(7, $profile_url, { pg_type => PG_TEXT });
+    $sth->bind_param(8, $pinned_id, { pg_type => PG_TEXT });
+    $sth->bind_param(9, $followers_count, SQL_INTEGER);
+    $sth->bind_param(10, $following_count, SQL_INTEGER);
+    $sth->bind_param(11, $statuses_count, SQL_INTEGER);
+    $sth->bind_param(12, $global_source, { pg_type => PG_TEXT });
+    $sth->execute();
+    my $ret = $sth->fetchall_arrayref;
+    die "something went very wrong" unless $weak || ($ret->[0][0] eq $id);
+    my $meta_date = $ret->[0][1] // "now";
+    $sth = $weak ? $weak_insert_authority_sth : $insert_authority_sth;
+    $sth->bind_param(1, $id, { pg_type => PG_TEXT });
+    $sth->bind_param(2, $orig, { pg_type => PG_TEXT });
+    $sth->bind_param(3, $meta_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(4, $meta_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(5, $global_source, { pg_type => PG_TEXT });
+    $sth->execute();
+    $ret = $sth->fetchall_arrayref;
+    die "something went very wrong" unless $weak || ($ret->[0][0] eq $id);
+    die "something went very wrong" unless $weak || ($ret->[0][1] eq $meta_date);
+    $dbh->commit;
+}
+
 sub generic_recurse {
     # Recurse into JSON structure, calling record_tweet or record_user
     # on whatever looks like it should be inserted.
@@ -424,16 +552,22 @@ sub generic_recurse {
 		if ( $k =~ m/\A[0-9]+\z/ ) {
 		    record_tweet_v1($rr->{$k}, 0)
 		} else {
-		    generic_recurse ($rr->{$k});
+		    print STDERR "ignoring nonsensical key $k in tweets structure\n";
 		}
 	    }
-	    foreach my $k ( keys(%{$r}) ) {
-		next if $k eq "tweets";
-		generic_recurse ($r->{$k});
+	}
+	if ( defined($r->{"users"}) ) {
+	    my $rr = $r->{"users"};
+	    foreach my $k ( keys(%{$rr}) ) {
+		if ( $k =~ m/\A[0-9]+\z/ ) {
+		    record_user_v1($rr->{$k}, 0)
+		} else {
+		    print STDERR "ignoring nonsensical key $k in users structure\n";
+		}
 	    }
-	    return;
 	}
 	foreach my $k ( keys(%{$r}) ) {
+	    next if $k eq "tweets" || $k eq "users";
 	    generic_recurse ($r->{$k});
 	}
     }
