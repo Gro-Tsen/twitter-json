@@ -429,7 +429,7 @@ $global_auth_date = strftime("%Y-%m-%d %H:%M:%S+00:00", gmtime((stat($f))[9]));
 my $part;
 my $content;
 while ($_ = <$f>) {
-    if ( $_ =~ m/^window\.YTD\.tweets\.part(\S+)\s*\=\s*\[\s*/ ) {
+    if ( $_ =~ m/^window\.YTD\.(?:deleted_)?tweets\.part(\S+)\s*\=\s*\[\s*/ ) {
 	$part = $1;
 	$content = "[\n";
 	printf STDERR "part %s starts\n", $part;
