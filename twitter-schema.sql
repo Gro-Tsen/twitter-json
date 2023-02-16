@@ -1,10 +1,13 @@
 SET TIME ZONE 'GMT' ;
 CREATE TABLE authority (
        id text NOT NULL ,
+       obj_type text NOT NULL ,
        orig json NOT NULL ,
        meta_inserted_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP ,
        meta_updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP ,
        meta_source text NOT NULL ,
+       auth_source text ,
+       auth_date timestamp with time zone ,
        CONSTRAINT authority_meta_source_id_key UNIQUE ( meta_source , id )
 ) ;
 CREATE TABLE tweets (

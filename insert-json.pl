@@ -5,6 +5,8 @@ use warnings;
 
 use Getopt::Std;
 
+use POSIX qw(strftime);
+
 use JSON::XS;
 use DateTime::Format::Strptime;
 
@@ -104,13 +106,18 @@ sub do_connect {
     die ("Can't set timezone: " . $dbh->errstr . "\n") if $dbh->err;
     # Prepare command to insert into "authority" table:
     my $command = "INSERT INTO authority "
-	. "( id , orig , meta_updated_at , meta_inserted_at , meta_source ) "
-	. "VALUES ( ?,?::json,?,?,? ) ";
+	. "( id , obj_type , orig "
+	. ", meta_updated_at , meta_inserted_at , meta_source "
+	. ", auth_source , auth_date ) "
+	. "VALUES ( ?,?,?::json,?,?,?,?,? ) ";
     my $conflict = "ON CONFLICT ON CONSTRAINT authority_meta_source_id_key DO UPDATE SET "
 	. "id = EXCLUDED.id "
+	. ", obj_type = EXCLUDED.obj_type "
 	. ", orig = EXCLUDED.orig "
 	. ", meta_updated_at = EXCLUDED.meta_updated_at "
-	. ", meta_source = EXCLUDED.meta_source ";
+	. ", meta_source = EXCLUDED.meta_source "
+	. ", auth_source = EXCLUDED.auth_source "
+	. ", auth_date = EXCLUDED.auth_date ";
     my $noconflict = "ON CONFLICT ON CONSTRAINT authority_meta_source_id_key DO NOTHING ";
     my $returning = "RETURNING id , meta_updated_at";
     $insert_authority_sth = $dbh->prepare($command . $conflict . $returning);
@@ -199,6 +206,9 @@ sub do_connect {
 }
 
 do_connect;
+
+my $global_auth_source;
+my $global_auth_date;
 
 sub record_tweet {
     # Insert tweet into database.  Arguments are the ref to the
@@ -437,10 +447,13 @@ sub record_tweet {
     my $meta_date = $ret->[0][1] // "now";
     $sth = $weak ? $weak_insert_authority_sth : $insert_authority_sth;
     $sth->bind_param(1, $id, { pg_type => PG_TEXT });
-    $sth->bind_param(2, $orig, { pg_type => PG_TEXT });
-    $sth->bind_param(3, $meta_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(2, "tweet", { pg_type => PG_TEXT });
+    $sth->bind_param(3, $orig, { pg_type => PG_TEXT });
     $sth->bind_param(4, $meta_date, { pg_type => PG_TIMESTAMPTZ });
-    $sth->bind_param(5, $global_source, { pg_type => PG_TEXT });
+    $sth->bind_param(5, $meta_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(6, $global_source, { pg_type => PG_TEXT });
+    $sth->bind_param(7, $global_auth_source, { pg_type => PG_TEXT });
+    $sth->bind_param(8, $global_auth_date, { pg_type => PG_TIMESTAMPTZ });
     $sth->execute();
     $ret = $sth->fetchall_arrayref;
     die "something went very wrong" unless $weak || ($ret->[0][0] eq $id);
@@ -511,10 +524,13 @@ sub record_media {
     my $meta_date = $ret->[0][1] // "now";
     $sth = $weak ? $weak_insert_authority_sth : $insert_authority_sth;
     $sth->bind_param(1, $id, { pg_type => PG_TEXT });
-    $sth->bind_param(2, $orig, { pg_type => PG_TEXT });
-    $sth->bind_param(3, $meta_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(2, "media", { pg_type => PG_TEXT });
+    $sth->bind_param(3, $orig, { pg_type => PG_TEXT });
     $sth->bind_param(4, $meta_date, { pg_type => PG_TIMESTAMPTZ });
-    $sth->bind_param(5, $global_source, { pg_type => PG_TEXT });
+    $sth->bind_param(5, $meta_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(6, $global_source, { pg_type => PG_TEXT });
+    $sth->bind_param(7, $global_auth_source, { pg_type => PG_TEXT });
+    $sth->bind_param(8, $global_auth_date, { pg_type => PG_TIMESTAMPTZ });
     $sth->execute();
     $ret = $sth->fetchall_arrayref;
     die "something went very wrong" unless $weak || ($ret->[0][0] eq $id);
@@ -601,10 +617,13 @@ sub record_user {
     my $meta_date = $ret->[0][1] // "now";
     $sth = $weak ? $weak_insert_authority_sth : $insert_authority_sth;
     $sth->bind_param(1, $id, { pg_type => PG_TEXT });
-    $sth->bind_param(2, $orig, { pg_type => PG_TEXT });
-    $sth->bind_param(3, $meta_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(2, "user", { pg_type => PG_TEXT });
+    $sth->bind_param(3, $orig, { pg_type => PG_TEXT });
     $sth->bind_param(4, $meta_date, { pg_type => PG_TIMESTAMPTZ });
-    $sth->bind_param(5, $global_source, { pg_type => PG_TEXT });
+    $sth->bind_param(5, $meta_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(6, $global_source, { pg_type => PG_TEXT });
+    $sth->bind_param(7, $global_auth_source, { pg_type => PG_TEXT });
+    $sth->bind_param(8, $global_auth_date, { pg_type => PG_TIMESTAMPTZ });
     $sth->execute();
     $ret = $sth->fetchall_arrayref;
     die "something went very wrong" unless $weak || ($ret->[0][0] eq $id);
@@ -651,6 +670,7 @@ sub process_content {
 		      =~ m/^application\/json(?:\;|$)/ ) ) {
 		my $subcontent = $ent->{"response"}->{"content"}->{"text"};
 		my $subdata = $json_decoder_unicode->decode($subcontent);
+		$global_auth_date = $ent->{"startedDateTime"};
 		generic_recurse $subdata;
 	    }
 	}
@@ -666,11 +686,14 @@ if ( scalar(@ARGV) ) {
 	print STDERR "processing file $fname\n";
 	local $/ = undef;  # enable localized slurp mode
 	my $content = <$f>;
+	$global_auth_source = $fname;
+	$global_auth_date = strftime("%Y-%m-%d %H:%M:%S+00:00", gmtime((stat($f))[9]));
 	process_content $content;
 	close $f;
     }
 } else {
     local $/ = undef;  # enable localized slurp mode
     my $content = <STDIN>;
+    $global_auth_date = strftime("%Y-%m-%d %H:%M:%S+00:00", gmtime((stat(STDIN))[9]));
     process_content $content;
 }
