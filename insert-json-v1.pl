@@ -200,6 +200,8 @@ sub do_connect {
 
 do_connect;
 
+my %global_quick_user_screen_names;
+
 sub record_tweet_v1 {
     # Insert tweet into database.  Arguments are the ref to the
     # tweet's (decoded) JSON, and a weak parameter indicating whether
@@ -234,7 +236,7 @@ sub record_tweet_v1 {
 	print STDERR "tweet $id has no author id: aborting\n";
 	return;
     }
-    my $author_screen_name = $rl->{"user_screen_name"} // $rl->{"user"}->{"screen_name"} // $rl->{"users"}->{$author_id}->{"screen_name"};
+    my $author_screen_name = $rl->{"user_screen_name"} // $rl->{"user"}->{"screen_name"} // $rl->{"users"}->{$author_id}->{"screen_name"} // $global_quick_user_screen_names{$author_id};
     my $conversation_id = $rl->{"conversation_id_str"};
     my $thread_id = $rl->{"self_thread"}->{"id_str"};
     ## Replyto
@@ -535,6 +537,7 @@ sub record_user_v1 {
     die "something went very wrong" unless $weak || ($ret->[0][0] eq $id);
     die "something went very wrong" unless $weak || ($ret->[0][1] eq $meta_date);
     $dbh->commit;
+    $global_quick_user_screen_names{$id} = $screen_name;
 }
 
 sub generic_recurse {
@@ -546,16 +549,6 @@ sub generic_recurse {
 	    generic_recurse ($r->[$i]);
 	}
     } elsif ( ref($r) eq "HASH" ) {
-	if ( defined($r->{"tweets"}) ) {
-	    my $rr = $r->{"tweets"};
-	    foreach my $k ( keys(%{$rr}) ) {
-		if ( $k =~ m/\A[0-9]+\z/ ) {
-		    record_tweet_v1($rr->{$k}, 0)
-		} else {
-		    print STDERR "ignoring nonsensical key $k in tweets structure\n";
-		}
-	    }
-	}
 	if ( defined($r->{"users"}) ) {
 	    my $rr = $r->{"users"};
 	    foreach my $k ( keys(%{$rr}) ) {
@@ -566,8 +559,18 @@ sub generic_recurse {
 		}
 	    }
 	}
+	if ( defined($r->{"tweets"}) ) {
+	    my $rr = $r->{"tweets"};
+	    foreach my $k ( keys(%{$rr}) ) {
+		if ( $k =~ m/\A[0-9]+\z/ ) {
+		    record_tweet_v1($rr->{$k}, 0)
+		} else {
+		    print STDERR "ignoring nonsensical key $k in tweets structure\n";
+		}
+	    }
+	}
 	foreach my $k ( keys(%{$r}) ) {
-	    next if $k eq "tweets" || $k eq "users";
+	    next if $k eq "users" || $k eq "tweets";
 	    generic_recurse ($r->{$k});
 	}
     }
@@ -588,10 +591,12 @@ sub process_content {
 		my $subcontent = $ent->{"response"}->{"content"}->{"text"};
 		next if $subcontent eq "";
 		my $subdata = $json_decoder_unicode->decode($subcontent);
+		%global_quick_user_screen_names = ();
 		generic_recurse $subdata;
 	    }
 	}
     } else {
+	%global_quick_user_screen_names = ();
 	generic_recurse $data;
     }
 }
