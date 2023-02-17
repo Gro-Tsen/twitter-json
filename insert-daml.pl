@@ -323,7 +323,13 @@ sub record_tweet_daml {
 	"urls" => \@urls
     };
     $r->{"lang"} = $lang;
-    my $orig = $json_coder_unicode->encode($r);
+    my $rl = $r;  # Simplify synchronization with insert-json.pl
+    ## Create JSON
+    my $orig = $json_coder_unicode->encode({
+	"__typename" => "Tweet",
+	"rest_id" => $id,
+	"legacy" => $rl
+    });
     ## Insert
     $dbh->{AutoCommit} = 0;
     my $sth = $weak ? $weak_insert_tweet_sth : $insert_tweet_sth;

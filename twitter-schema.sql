@@ -2,7 +2,7 @@ SET TIME ZONE 'GMT' ;
 CREATE TABLE authority (
        id text NOT NULL ,
        obj_type text NOT NULL ,
-       orig json NOT NULL ,
+       orig jsonb NOT NULL ,
        meta_inserted_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP ,
        meta_updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP ,
        meta_source text NOT NULL ,

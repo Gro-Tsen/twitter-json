@@ -218,7 +218,6 @@ sub record_tweet_v1 {
     # we should leave existing entries.
     my $r = shift;
     my $weak = shift || $global_weak;  # If 1 leave existing records be
-    my $orig = $json_coder_unicode->encode($r);
     ## Basic stuff
     my $id = $r->{"id_str"};
     unless ( defined($id) ) {
@@ -317,6 +316,12 @@ sub record_tweet_v1 {
     my $retweet_count = $rl->{"retweet_count"};
     # my $quote_count = $rl->{"quote_count"};
     # my $reply_count = $rl->{"reply_count"};
+    ## Create JSON
+    my $orig = $json_coder_unicode->encode({
+	"__typename" => "Tweet",
+	"rest_id" => $id,
+	"legacy" => $rl
+    });
     ## Insert
     $dbh->{AutoCommit} = 0;
     my $sth = $weak ? $weak_insert_tweet_sth : $insert_tweet_sth;
@@ -377,7 +382,6 @@ sub record_media {
     my $r = shift;
     my $weak = shift || $global_weak;  # If 1 leave existing records be
     my $caller_id = shift;
-    my $orig = $json_coder_unicode->encode($r);
     ## Basic stuff
     my $id = $r->{"id_str"};
     unless ( defined($id) ) {
@@ -407,6 +411,8 @@ sub record_media {
     }
     # Sadly, not present in tweets.js (so this will always give undef):
     my $alt_text = $r->{"ext_alt_text"};
+    ## Create JSON
+    my $orig = $json_coder_unicode->encode($r);
     ## Insert
     $dbh->{AutoCommit} = 0;
     my $sth = $weak ? $weak_insert_media_sth : $insert_media_sth;
