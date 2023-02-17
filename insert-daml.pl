@@ -86,10 +86,10 @@ sub do_connect {
 	. ", meta_source = EXCLUDED.meta_source "
 	. ", auth_source = EXCLUDED.auth_source "
 	. ", auth_date = EXCLUDED.auth_date ";
-    my $noconflict = "ON CONFLICT ON CONSTRAINT authority_meta_source_id_key DO NOTHING ";
+    my $weak_conflict = "ON CONFLICT ON CONSTRAINT authority_meta_source_id_key DO NOTHING ";
     my $returning = "RETURNING id , meta_updated_at";
     $insert_authority_sth = $dbh->prepare($command . $conflict . $returning);
-    $weak_insert_authority_sth = $dbh->prepare($command . $noconflict . $returning);
+    $weak_insert_authority_sth = $dbh->prepare($command . $weak_conflict . $returning);
     # Prepare command to insert into "tweets" table:
     $command = "INSERT INTO tweets "
 	. "( id , created_at , author_id , author_screen_name "
@@ -126,10 +126,28 @@ sub do_connect {
 	. ", reply_count = COALESCE(EXCLUDED.reply_count, tweets.reply_count) "
 	. ", meta_updated_at = EXCLUDED.meta_updated_at "
 	. ", meta_source = EXCLUDED.meta_source ";
-    $noconflict = "ON CONFLICT ( id ) DO NOTHING ";
+    $weak_conflict = "ON CONFLICT ( id ) DO UPDATE SET "
+	. "conversation_id = COALESCE(tweets.conversation_id, EXCLUDED.conversation_id) "
+	. ", thread_id = COALESCE(tweets.thread_id, EXCLUDED.thread_id) "
+	. ", replyto_id = COALESCE(tweets.replyto_id, EXCLUDED.replyto_id) "
+	. ", replyto_author_id = COALESCE(tweets.replyto_author_id, EXCLUDED.replyto_author_id) "
+	. ", replyto_author_screen_name = COALESCE(tweets.replyto_author_screen_name, EXCLUDED.replyto_author_screen_name) "
+	. ", retweeted_id = COALESCE(tweets.retweeted_id, EXCLUDED.retweeted_id) "
+	. ", retweeted_author_id = COALESCE(tweets.retweeted_author_id, EXCLUDED.retweeted_author_id) "
+	. ", retweeted_author_screen_name = COALESCE(tweets.retweeted_author_screen_name, EXCLUDED.retweeted_author_screen_name) "
+	. ", quoted_id = COALESCE(tweets.quoted_id, EXCLUDED.quoted_id) "
+	. ", quoted_author_id = COALESCE(tweets.quoted_author_id, EXCLUDED.quoted_author_id) "
+	. ", quoted_author_screen_name = COALESCE(tweets.quoted_author_screen_name, EXCLUDED.quoted_author_screen_name) "
+	. ", lang = COALESCE(tweets.lang, EXCLUDED.lang) "
+	. ", favorite_count = COALESCE(tweets.favorite_count, EXCLUDED.favorite_count) "
+	. ", retweet_count = COALESCE(tweets.retweet_count, EXCLUDED.retweet_count) "
+	. ", quote_count = COALESCE(tweets.quote_count, EXCLUDED.quote_count) "
+	. ", reply_count = COALESCE(tweets.reply_count, EXCLUDED.reply_count) "
+	. ", meta_updated_at = EXCLUDED.meta_updated_at "
+	. ", meta_source = EXCLUDED.meta_source ";
     $returning = "RETURNING id , meta_updated_at";
     $insert_tweet_sth = $dbh->prepare($command . $conflict . $returning);
-    $weak_insert_tweet_sth = $dbh->prepare($command . $noconflict . $returning);
+    $weak_insert_tweet_sth = $dbh->prepare($command . $weak_conflict . $returning);
 }
 
 do_connect;
