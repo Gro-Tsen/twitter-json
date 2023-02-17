@@ -254,10 +254,10 @@ sub record_tweet_v1 {
 	# }
     }
     ## Retweeted
-    my $retweeted_id;
+    my ($retweeted_id, $retweeted_author_screen_name);
     # Sadly, not present in tweets.js (so this will always give undef):
     $retweeted_id = $rl->{"retweeted_status_id_str"} // $rl->{"retweeted_status"}->{"id_str"};
-    # $retweeted_author_id, $retweeted_author_screen_name are set below.
+    # $retweeted_author_screen_name is set below.
     ## Quoted
     my ($quoted_id, $quoted_author_screen_name);
     $quoted_id = $rl->{"quoted_status_id_str"};
@@ -267,6 +267,9 @@ sub record_tweet_v1 {
     unless ( defined($full_text) ) {
 	print STDERR "tweet $id has no text: aborting\n";
 	return;
+    }
+    if ( $full_text =~ m/\ART\ \@([A-Za-z0-9\_]+)\:/ ) {
+	$retweeted_author_screen_name = $1;
     }
     # Attempt to reconstruct tweet input text
     my $input_text = $full_text;
@@ -336,7 +339,7 @@ sub record_tweet_v1 {
     $sth->bind_param(9, $replyto_author_screen_name, { pg_type => PG_TEXT });
     $sth->bind_param(10, $retweeted_id, { pg_type => PG_TEXT });
     $sth->bind_param(11, undef, { pg_type => PG_TEXT });
-    $sth->bind_param(12, undef, { pg_type => PG_TEXT });
+    $sth->bind_param(12, $retweeted_author_screen_name, { pg_type => PG_TEXT });
     $sth->bind_param(13, $quoted_id, { pg_type => PG_TEXT });
     $sth->bind_param(14, undef, { pg_type => PG_TEXT });
     $sth->bind_param(15, $quoted_author_screen_name, { pg_type => PG_TEXT });
