@@ -419,7 +419,7 @@ sub record_tweet {
     $dbh->{AutoCommit} = 0;
     my $sth = $weak ? $weak_insert_tweet_sth : $insert_tweet_sth;
     $sth->bind_param(1, $id, { pg_type => PG_TEXT });
-    $sth->bind_param(2, $created_at, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(2, $created_at_iso, { pg_type => PG_TIMESTAMPTZ });
     $sth->bind_param(3, $author_id, { pg_type => PG_TEXT });
     $sth->bind_param(4, $author_screen_name, { pg_type => PG_TEXT });
     $sth->bind_param(5, $conversation_id, { pg_type => PG_TEXT });
@@ -570,6 +570,7 @@ sub record_user {
 	print STDERR "user $id has invalid creation date: aborting\n";
 	return;
     }
+    my $created_at_iso = $created_at->strftime("%Y-%m-%d %H:%M:%S+00:00");
     my $screen_name = $rl->{"screen_name"};
     my $full_name = $rl->{"name"};
     ## Description
@@ -600,7 +601,7 @@ sub record_user {
     $dbh->{AutoCommit} = 0;
     my $sth = $weak ? $weak_insert_user_sth : $insert_user_sth;
     $sth->bind_param(1, $id, { pg_type => PG_TEXT });
-    $sth->bind_param(2, $created_at, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(2, $created_at_iso, { pg_type => PG_TIMESTAMPTZ });
     $sth->bind_param(3, $screen_name, { pg_type => PG_TEXT });
     $sth->bind_param(4, $full_name, { pg_type => PG_TEXT });
     $sth->bind_param(5, $profile_description, { pg_type => PG_TEXT });

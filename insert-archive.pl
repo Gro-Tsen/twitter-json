@@ -298,7 +298,7 @@ sub record_tweet_v1 {
     $dbh->{AutoCommit} = 0;
     my $sth = $weak ? $weak_insert_tweet_sth : $insert_tweet_sth;
     $sth->bind_param(1, $id, { pg_type => PG_TEXT });
-    $sth->bind_param(2, $created_at, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(2, $created_at_iso, { pg_type => PG_TIMESTAMPTZ });
     $sth->bind_param(3, $author_id, { pg_type => PG_TEXT });
     $sth->bind_param(4, $author_screen_name, { pg_type => PG_TEXT });
     $sth->bind_param(5, undef, { pg_type => PG_TEXT });
