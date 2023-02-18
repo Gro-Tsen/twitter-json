@@ -69,6 +69,10 @@ CREATE TABLE media (
        id text PRIMARY KEY ,
        /* id of parent tweet, not always avail as ["source_status_id_str"] */
        parent_id text NOT NULL ,
+       /* not always avail as ["source_user_id_str"] */
+       parent_author_id text NOT NULL ,
+       /* inferred from ["expanded_url"] */
+       parent_author_screen_name text ,
        /* ["url"] */
        short_url text NOT NULL ,
        /* ["display_url"] */
@@ -126,6 +130,8 @@ CREATE INDEX tweets_quoted_key ON tweets ( quoted_id ) ;
 CREATE INDEX tweets_quoted_author_key ON tweets ( quoted_author_id ) ;
 CREATE INDEX tweets_quoted_screen_name_key ON tweets ( quoted_author_screen_name ) ;
 CREATE INDEX media_parent_key ON media ( parent_id ) ;
+CREATE INDEX media_parent_author_key ON media ( parent_author_id ) ;
+CREATE INDEX media_parent_author_screen_name_key ON media ( parent_author_screen_name ) ;
 CREATE INDEX media_short_url_key ON media ( short_url ) ;
 CREATE INDEX media_display_url_key ON media ( display_url ) ;
 CREATE INDEX users_screen_name_key ON users ( screen_name ) ;

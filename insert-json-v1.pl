@@ -182,13 +182,16 @@ sub do_connect {
     $weak_insert_tweet_sth = $dbh->prepare($command . $weak_conflict . $returning);
     # Prepare command to insert into "media" table:
     $command = "INSERT INTO media "
-	. "( id , parent_id , short_url , display_url "
+	. "( id , parent_id , parent_author_id , parent_author_screen_name "
+	. ", short_url , display_url "
 	. ", media_url , media_type , alt_text "
 	. ", meta_source ) "
-	. "VALUES ( ?,?,?,?,?,?,?,? ) ";
+	. "VALUES ( ?,?,?,?,?,?,?,?,?,? ) ";
     $conflict = "ON CONFLICT ( id ) DO UPDATE SET "
 	. "id = EXCLUDED.id "
 	. ", parent_id = EXCLUDED.parent_id "
+	. ", parent_author_id = EXCLUDED.parent_author_id "
+	. ", parent_author_screen_name = COALESCE(EXCLUDED.parent_author_screen_name, media.parent_author_screen_name) "
 	. ", short_url = EXCLUDED.short_url "
 	. ", display_url = EXCLUDED.display_url "
 	. ", media_url = COALESCE(EXCLUDED.media_url, media.media_url) "
@@ -197,7 +200,8 @@ sub do_connect {
 	. ", meta_updated_at = EXCLUDED.meta_updated_at "
 	. ", meta_source = EXCLUDED.meta_source ";
     $weak_conflict = "ON CONFLICT ( id ) DO UPDATE SET "
-	. "media_url = COALESCE(media.media_url, EXCLUDED.media_url) "
+	. "parent_author_screen_name = COALESCE(media.parent_author_screen_name, EXCLUDED.parent_author_screen_name) "
+	. ", media_url = COALESCE(media.media_url, EXCLUDED.media_url) "
 	. ", alt_text = COALESCE(media.alt_text, EXCLUDED.alt_text) "
 	. ", meta_updated_at = EXCLUDED.meta_updated_at "
 	. ", meta_source = EXCLUDED.meta_source ";
@@ -418,7 +422,7 @@ sub record_tweet_v1 {
     ## Process media, author, and retweeted or quoted tweet
     if ( defined($media_lst_r) && ref($media_lst_r) eq "ARRAY" ) {
 	foreach my $media_r ( @{$media_lst_r} ) {
-	    record_media($media_r, $weak, $id);
+	    record_media($media_r, $weak, $id, $author_id, $author_screen_name);
 	}
     }
     if ( defined($rl->{"user"}) ) {
@@ -444,10 +448,13 @@ sub record_media {
     # Insert media entry into database.  Arguments are the ref to the
     # media entry's (decoded) JSON, a weak parameter indicating
     # whether we should leave existing entries, and the id of the
-    # caller tweet.
+    # caller tweet, caller tweet's user and caller tweet's user screen
+    # name.
     my $r = shift;
     my $weak = shift || $global_weak;  # If 1 leave existing records be
     my $caller_id = shift;
+    my $caller_author_id = shift;
+    my $caller_author_screen_name = shift;
     ## Basic stuff
     my $id = $r->{"id_str"};
     unless ( defined($id) ) {
@@ -459,6 +466,17 @@ sub record_media {
 	return;
     }
     my $parent_id = $r->{"source_status_id_str"} // $caller_id;
+    my $parent_author_id = $r->{"source_user_id_str"} // $caller_author_id;
+    my $parent_author_screen_name;
+    my $expanded_url = $r->{"expanded_url"};
+    if ( defined($expanded_url)
+	 && $expanded_url =~ /\Ahttps?\:\/\/(?:mobile\.)?twitter\.com\/([A-Za-z0-9\_]+)\/status\/([0-9]+)\// ) {
+	$parent_author_screen_name = $1;
+	if ( $parent_id ne $2 ) {
+	    print STDERR "media $id has unexpected parent id in expanded url\n";
+	}
+    }
+    $parent_author_screen_name = $parent_author_screen_name // $caller_author_screen_name;
     my $short_url = $r->{"url"};
     unless ( defined($short_url) ) {
 	print STDERR "media $id has no short url: aborting\n";
@@ -483,12 +501,14 @@ sub record_media {
     my $sth = $weak ? $weak_insert_media_sth : $insert_media_sth;
     $sth->bind_param(1, $id, { pg_type => PG_TEXT });
     $sth->bind_param(2, $parent_id, { pg_type => PG_TEXT });
-    $sth->bind_param(3, $short_url, { pg_type => PG_TEXT });
-    $sth->bind_param(4, $display_url, { pg_type => PG_TEXT });
-    $sth->bind_param(5, $media_url, { pg_type => PG_TEXT });
-    $sth->bind_param(6, $media_type, { pg_type => PG_TEXT });
-    $sth->bind_param(7, $alt_text, { pg_type => PG_TEXT });
-    $sth->bind_param(8, $global_source, { pg_type => PG_TEXT });
+    $sth->bind_param(3, $parent_author_id, { pg_type => PG_TEXT });
+    $sth->bind_param(4, $parent_author_screen_name, { pg_type => PG_TEXT });
+    $sth->bind_param(5, $short_url, { pg_type => PG_TEXT });
+    $sth->bind_param(6, $display_url, { pg_type => PG_TEXT });
+    $sth->bind_param(7, $media_url, { pg_type => PG_TEXT });
+    $sth->bind_param(8, $media_type, { pg_type => PG_TEXT });
+    $sth->bind_param(9, $alt_text, { pg_type => PG_TEXT });
+    $sth->bind_param(10, $global_source, { pg_type => PG_TEXT });
     $sth->execute();
     my $ret = $sth->fetchall_arrayref;
     die "something went very wrong" unless $weak || ($ret->[0][0] eq $id);
@@ -507,6 +527,11 @@ sub record_media {
     die "something went very wrong" unless $weak || ($ret->[0][0] eq $id);
     die "something went very wrong" unless $weak || ($ret->[0][1] eq $meta_date);
     $dbh->commit;
+    ## Some media include a source user:
+    if ( defined($r->{"additional_media_info"}->{"source_user"}->{"id_str"}) ) {
+	my $parent_author_r = $r->{"additional_media_info"}->{"source_user"};
+	record_user_v1($parent_author_r, $weak);
+    }
 }
 
 sub record_user_v1 {
