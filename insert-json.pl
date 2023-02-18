@@ -14,7 +14,7 @@ use DBI qw(:sql_types);
 use DBD::Pg qw(:pg_types);
 
 my %opts;
-getopts('hws:', \%opts);
+getopts('d:hws:', \%opts);
 
 my $har_mode = $opts{h};
 
@@ -87,7 +87,7 @@ sub substitute_in_string {
 my $datetime_parser = DateTime::Format::Strptime->new(
     pattern => "%a %b %d %T %z %Y", time_zone => "UTC", locale => "C");
 
-my $dbname = "twitter";
+my $dbname = $opts{d} // "twitter";
 my $dbh;  # Connection to database
 my $insert_authority_sth;
 my $weak_insert_authority_sth;
@@ -118,7 +118,10 @@ sub do_connect {
 	. ", meta_source = EXCLUDED.meta_source "
 	. ", auth_source = EXCLUDED.auth_source "
 	. ", auth_date = EXCLUDED.auth_date ";
-    my $weak_conflict = "ON CONFLICT ON CONSTRAINT authority_meta_source_id_key DO NOTHING ";
+    my $weak_conflict = "ON CONFLICT ON CONSTRAINT authority_meta_source_id_key DO UPDATE SET "
+	# This is a deliberate no-op, but we can't DO NOTHING because
+	# we want to return the id line.
+	. "id = authority.id ";
     my $returning = "RETURNING id , meta_updated_at";
     $insert_authority_sth = $dbh->prepare($command . $conflict . $returning);
     $weak_insert_authority_sth = $dbh->prepare($command . $weak_conflict . $returning);
@@ -131,11 +134,10 @@ sub do_connect {
 	. ", quoted_id , quoted_author_id , quoted_author_screen_name "
 	. ", full_text , input_text , lang "
 	. ", favorite_count , retweet_count , quote_count , reply_count "
-	. ", meta_source ) "
-	. "VALUES ( ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? ) ";
+	. ", meta_updated_at , meta_source ) "
+	. "VALUES ( ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? ) ";
     $conflict = "ON CONFLICT ( id ) DO UPDATE SET "
-	. "id = EXCLUDED.id "
-	. ", created_at = EXCLUDED.created_at "
+	. "created_at = EXCLUDED.created_at "
 	. ", author_id = EXCLUDED.author_id "
 	. ", author_screen_name = EXCLUDED.author_screen_name "
 	. ", conversation_id = COALESCE(EXCLUDED.conversation_id, tweets.conversation_id) "
@@ -185,11 +187,10 @@ sub do_connect {
 	. "( id , parent_id , parent_author_id , parent_author_screen_name "
 	. ", short_url , display_url "
 	. ", media_url , media_type , alt_text "
-	. ", meta_source ) "
-	. "VALUES ( ?,?,?,?,?,?,?,?,?,? ) ";
+	. ", meta_updated_at , meta_source ) "
+	. "VALUES ( ?,?,?,?,?,?,?,?,?,?,? ) ";
     $conflict = "ON CONFLICT ( id ) DO UPDATE SET "
-	. "id = EXCLUDED.id "
-	. ", parent_id = EXCLUDED.parent_id "
+	. "parent_id = EXCLUDED.parent_id "
 	. ", parent_author_id = EXCLUDED.parent_author_id "
 	. ", parent_author_screen_name = COALESCE(EXCLUDED.parent_author_screen_name, media.parent_author_screen_name) "
 	. ", short_url = EXCLUDED.short_url "
@@ -212,11 +213,10 @@ sub do_connect {
 	. "( id , created_at , screen_name , full_name "
 	. ", profile_description , profile_input_description , profile_url "
 	. ", pinned_id , followers_count , following_count , statuses_count "
-	. ", meta_source ) "
-	. "VALUES ( ?,?,?,?,?,?,?,?,?,?,?,? ) ";
+	. ", meta_updated_at , meta_source ) "
+	. "VALUES ( ?,?,?,?,?,?,?,?,?,?,?,?,? ) ";
     $conflict = "ON CONFLICT ( id ) DO UPDATE SET "
-	. "id = EXCLUDED.id "
-	. ", created_at = EXCLUDED.created_at "
+	. "created_at = EXCLUDED.created_at "
 	. ", screen_name = EXCLUDED.screen_name "
 	. ", full_name = COALESCE(EXCLUDED.full_name, users.full_name) "
 	. ", profile_description = COALESCE(EXCLUDED.profile_description, users.profile_description) "
@@ -456,7 +456,20 @@ sub record_tweet {
     my $orig = $json_coder_unicode->encode($r);
     ## Insert
     $dbh->{AutoCommit} = 0;
-    my $sth = $weak ? $weak_insert_tweet_sth : $insert_tweet_sth;
+    my $sth = $weak ? $weak_insert_authority_sth : $insert_authority_sth;
+    $sth->bind_param(1, $id, { pg_type => PG_TEXT });
+    $sth->bind_param(2, "tweet", { pg_type => PG_TEXT });
+    $sth->bind_param(3, $orig, { pg_type => PG_TEXT });
+    $sth->bind_param(4, "now", { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(5, "now", { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(6, $global_source, { pg_type => PG_TEXT });
+    $sth->bind_param(7, $global_auth_source, { pg_type => PG_TEXT });
+    $sth->bind_param(8, $global_auth_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->execute();
+    my $ret = $sth->fetchall_arrayref;
+    die "insertion into database failed" unless defined($ret->[0][0]) && ($ret->[0][0] eq $id);
+    my $meta_date = $ret->[0][1] // "now";
+    $sth = $weak ? $weak_insert_tweet_sth : $insert_tweet_sth;
     $sth->bind_param(1, $id, { pg_type => PG_TEXT });
     $sth->bind_param(2, $created_at_iso, { pg_type => PG_TIMESTAMPTZ });
     $sth->bind_param(3, $author_id, { pg_type => PG_TEXT });
@@ -479,24 +492,11 @@ sub record_tweet {
     $sth->bind_param(20, $retweet_count, SQL_INTEGER);
     $sth->bind_param(21, $quote_count, SQL_INTEGER);
     $sth->bind_param(22, $reply_count, SQL_INTEGER);
-    $sth->bind_param(23, $global_source, { pg_type => PG_TEXT });
-    $sth->execute();
-    my $ret = $sth->fetchall_arrayref;
-    die "something went very wrong" unless $weak || ($ret->[0][0] eq $id);
-    my $meta_date = $ret->[0][1] // "now";
-    $sth = $weak ? $weak_insert_authority_sth : $insert_authority_sth;
-    $sth->bind_param(1, $id, { pg_type => PG_TEXT });
-    $sth->bind_param(2, "tweet", { pg_type => PG_TEXT });
-    $sth->bind_param(3, $orig, { pg_type => PG_TEXT });
-    $sth->bind_param(4, $meta_date, { pg_type => PG_TIMESTAMPTZ });
-    $sth->bind_param(5, $meta_date, { pg_type => PG_TIMESTAMPTZ });
-    $sth->bind_param(6, $global_source, { pg_type => PG_TEXT });
-    $sth->bind_param(7, $global_auth_source, { pg_type => PG_TEXT });
-    $sth->bind_param(8, $global_auth_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(23, $meta_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(24, $global_source, { pg_type => PG_TEXT });
     $sth->execute();
     $ret = $sth->fetchall_arrayref;
-    die "something went very wrong" unless $weak || ($ret->[0][0] eq $id);
-    die "something went very wrong" unless $weak || ($ret->[0][1] eq $meta_date);
+    die "insertion into database failed" unless defined($ret->[0][0]) && ($ret->[0][0] eq $id);
     $dbh->commit;
     ## Process media, author, and retweeted or quoted tweet
     if ( defined($media_lst_r) && ref($media_lst_r) eq "ARRAY" ) {
@@ -563,7 +563,20 @@ sub record_media {
     my $orig = $json_coder_unicode->encode($r);
     ## Insert
     $dbh->{AutoCommit} = 0;
-    my $sth = $weak ? $weak_insert_media_sth : $insert_media_sth;
+    my $sth = $weak ? $weak_insert_authority_sth : $insert_authority_sth;
+    $sth->bind_param(1, $id, { pg_type => PG_TEXT });
+    $sth->bind_param(2, "media", { pg_type => PG_TEXT });
+    $sth->bind_param(3, $orig, { pg_type => PG_TEXT });
+    $sth->bind_param(4, "now", { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(5, "now", { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(6, $global_source, { pg_type => PG_TEXT });
+    $sth->bind_param(7, $global_auth_source, { pg_type => PG_TEXT });
+    $sth->bind_param(8, $global_auth_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->execute();
+    my $ret = $sth->fetchall_arrayref;
+    die "insertion into database failed" unless defined($ret->[0][0]) && ($ret->[0][0] eq $id);
+    my $meta_date = $ret->[0][1] // "now";
+    $sth = $weak ? $weak_insert_media_sth : $insert_media_sth;
     $sth->bind_param(1, $id, { pg_type => PG_TEXT });
     $sth->bind_param(2, $parent_id, { pg_type => PG_TEXT });
     $sth->bind_param(3, $parent_author_id, { pg_type => PG_TEXT });
@@ -573,24 +586,11 @@ sub record_media {
     $sth->bind_param(7, $media_url, { pg_type => PG_TEXT });
     $sth->bind_param(8, $media_type, { pg_type => PG_TEXT });
     $sth->bind_param(9, $alt_text, { pg_type => PG_TEXT });
-    $sth->bind_param(10, $global_source, { pg_type => PG_TEXT });
-    $sth->execute();
-    my $ret = $sth->fetchall_arrayref;
-    die "something went very wrong" unless $weak || ($ret->[0][0] eq $id);
-    my $meta_date = $ret->[0][1] // "now";
-    $sth = $weak ? $weak_insert_authority_sth : $insert_authority_sth;
-    $sth->bind_param(1, $id, { pg_type => PG_TEXT });
-    $sth->bind_param(2, "media", { pg_type => PG_TEXT });
-    $sth->bind_param(3, $orig, { pg_type => PG_TEXT });
-    $sth->bind_param(4, $meta_date, { pg_type => PG_TIMESTAMPTZ });
-    $sth->bind_param(5, $meta_date, { pg_type => PG_TIMESTAMPTZ });
-    $sth->bind_param(6, $global_source, { pg_type => PG_TEXT });
-    $sth->bind_param(7, $global_auth_source, { pg_type => PG_TEXT });
-    $sth->bind_param(8, $global_auth_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(10, $meta_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(11, $global_source, { pg_type => PG_TEXT });
     $sth->execute();
     $ret = $sth->fetchall_arrayref;
-    die "something went very wrong" unless $weak || ($ret->[0][0] eq $id);
-    die "something went very wrong" unless $weak || ($ret->[0][1] eq $meta_date);
+    die "insertion into database failed" unless defined($ret->[0][0]) && ($ret->[0][0] eq $id);
     $dbh->commit;
     ## Some media include a source user:
     if ( defined($r->{"additional_media_info"}->{"source_user"}->{"user_results"}->{"result"})
@@ -664,7 +664,20 @@ sub record_user {
     my $orig = $json_coder_unicode->encode($r);
     ## Insert
     $dbh->{AutoCommit} = 0;
-    my $sth = $weak ? $weak_insert_user_sth : $insert_user_sth;
+    my $sth = $weak ? $weak_insert_authority_sth : $insert_authority_sth;
+    $sth->bind_param(1, $id, { pg_type => PG_TEXT });
+    $sth->bind_param(2, "user", { pg_type => PG_TEXT });
+    $sth->bind_param(3, $orig, { pg_type => PG_TEXT });
+    $sth->bind_param(4, "now", { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(5, "now", { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(6, $global_source, { pg_type => PG_TEXT });
+    $sth->bind_param(7, $global_auth_source, { pg_type => PG_TEXT });
+    $sth->bind_param(8, $global_auth_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->execute();
+    my $ret = $sth->fetchall_arrayref;
+    die "insertion into database failed" unless defined($ret->[0][0]) && ($ret->[0][0] eq $id);
+    my $meta_date = $ret->[0][1] // "now";
+    $sth = $weak ? $weak_insert_user_sth : $insert_user_sth;
     $sth->bind_param(1, $id, { pg_type => PG_TEXT });
     $sth->bind_param(2, $created_at_iso, { pg_type => PG_TIMESTAMPTZ });
     $sth->bind_param(3, $screen_name, { pg_type => PG_TEXT });
@@ -676,24 +689,11 @@ sub record_user {
     $sth->bind_param(9, $followers_count, SQL_INTEGER);
     $sth->bind_param(10, $following_count, SQL_INTEGER);
     $sth->bind_param(11, $statuses_count, SQL_INTEGER);
-    $sth->bind_param(12, $global_source, { pg_type => PG_TEXT });
-    $sth->execute();
-    my $ret = $sth->fetchall_arrayref;
-    die "something went very wrong" unless $weak || ($ret->[0][0] eq $id);
-    my $meta_date = $ret->[0][1] // "now";
-    $sth = $weak ? $weak_insert_authority_sth : $insert_authority_sth;
-    $sth->bind_param(1, $id, { pg_type => PG_TEXT });
-    $sth->bind_param(2, "user", { pg_type => PG_TEXT });
-    $sth->bind_param(3, $orig, { pg_type => PG_TEXT });
-    $sth->bind_param(4, $meta_date, { pg_type => PG_TIMESTAMPTZ });
-    $sth->bind_param(5, $meta_date, { pg_type => PG_TIMESTAMPTZ });
-    $sth->bind_param(6, $global_source, { pg_type => PG_TEXT });
-    $sth->bind_param(7, $global_auth_source, { pg_type => PG_TEXT });
-    $sth->bind_param(8, $global_auth_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(12, $meta_date, { pg_type => PG_TIMESTAMPTZ });
+    $sth->bind_param(13, $global_source, { pg_type => PG_TEXT });
     $sth->execute();
     $ret = $sth->fetchall_arrayref;
-    die "something went very wrong" unless $weak || ($ret->[0][0] eq $id);
-    die "something went very wrong" unless $weak || ($ret->[0][1] eq $meta_date);
+    die "insertion into database failed" unless defined($ret->[0][0]) && ($ret->[0][0] eq $id);
     $dbh->commit;
 }
 
