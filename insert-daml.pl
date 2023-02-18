@@ -126,7 +126,7 @@ sub do_connect {
 	. ", retweet_count = COALESCE(EXCLUDED.retweet_count, tweets.retweet_count) "
 	. ", quote_count = COALESCE(EXCLUDED.quote_count, tweets.quote_count) "
 	. ", reply_count = COALESCE(EXCLUDED.reply_count, tweets.reply_count) "
-	. ", meta_updated_at = EXCLUDED.meta_updated_at "
+	. ", meta_updated_at = GREATEST(EXCLUDED.meta_updated_at, tweets.meta_updated_at) "
 	. ", meta_source = EXCLUDED.meta_source ";
     $weak_conflict = "ON CONFLICT ( id ) DO UPDATE SET "
 	. "conversation_id = COALESCE(tweets.conversation_id, EXCLUDED.conversation_id) "
@@ -145,8 +145,7 @@ sub do_connect {
 	. ", retweet_count = COALESCE(tweets.retweet_count, EXCLUDED.retweet_count) "
 	. ", quote_count = COALESCE(tweets.quote_count, EXCLUDED.quote_count) "
 	. ", reply_count = COALESCE(tweets.reply_count, EXCLUDED.reply_count) "
-	. ", meta_updated_at = EXCLUDED.meta_updated_at "
-	. ", meta_source = EXCLUDED.meta_source ";
+	. ", meta_updated_at = GREATEST(tweets.meta_updated_at, EXCLUDED.meta_updated_at) ";
     $returning = "RETURNING id , meta_updated_at";
     $insert_tweet_sth = $dbh->prepare($command . $conflict . $returning);
     $weak_insert_tweet_sth = $dbh->prepare($command . $weak_conflict . $returning);
