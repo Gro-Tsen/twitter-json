@@ -182,7 +182,6 @@ sub record_tweet_daml {
     if ( $attrlist =~ m/\s+xml\:lang\=\"([A-Za-z0-9\-]+)\"/ ) {
 	$lang = $1;
     }
-    $lang = undef if defined($lang) && $lang eq "und";
     unless ( $permalink =~ m/\Ahttps\:\/\/twitter\.com\/([A-Za-z0-9\_]+)\/status\/([0-9]+)\z/
 	&& $2 eq $id ) {
 	print STDERR "the following tweet line has badly formed permalink: aborting\n";
