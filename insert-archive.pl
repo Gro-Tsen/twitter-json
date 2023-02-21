@@ -161,7 +161,7 @@ sub do_connect {
 	. ", quote_count = COALESCE(EXCLUDED.quote_count, tweets.quote_count) "
 	. ", reply_count = COALESCE(EXCLUDED.reply_count, tweets.reply_count) "
 	. ", meta_updated_at = GREATEST(EXCLUDED.meta_updated_at, tweets.meta_updated_at) "
-	. ", meta_source = EXCLUDED.meta_source ";
+	. ", meta_source = CASE WHEN EXCLUDED.meta_updated_at > tweets.meta_updated_at THEN EXCLUDED.meta_source ELSE tweets.meta_source END ";
     $weak_conflict = "ON CONFLICT ( id ) DO UPDATE SET "
 	. "conversation_id = COALESCE(tweets.conversation_id, EXCLUDED.conversation_id) "
 	. ", thread_id = COALESCE(tweets.thread_id, EXCLUDED.thread_id) "
@@ -179,7 +179,8 @@ sub do_connect {
 	. ", retweet_count = COALESCE(tweets.retweet_count, EXCLUDED.retweet_count) "
 	. ", quote_count = COALESCE(tweets.quote_count, EXCLUDED.quote_count) "
 	. ", reply_count = COALESCE(tweets.reply_count, EXCLUDED.reply_count) "
-	. ", meta_updated_at = GREATEST(tweets.meta_updated_at, EXCLUDED.meta_updated_at) ";
+	. ", meta_updated_at = GREATEST(EXCLUDED.meta_updated_at, tweets.meta_updated_at) "
+	. ", meta_source = CASE WHEN EXCLUDED.meta_updated_at > tweets.meta_updated_at THEN EXCLUDED.meta_source ELSE tweets.meta_source END ";
     $returning = "RETURNING id , meta_updated_at";
     $insert_tweet_sth = $dbh->prepare($command . $conflict . $returning);
     $weak_insert_tweet_sth = $dbh->prepare($command . $weak_conflict . $returning);
@@ -200,12 +201,13 @@ sub do_connect {
 	. ", media_type = EXCLUDED.media_type "
 	. ", alt_text = COALESCE(EXCLUDED.alt_text, media.alt_text) "
 	. ", meta_updated_at = GREATEST(EXCLUDED.meta_updated_at, media.meta_updated_at) "
-	. ", meta_source = EXCLUDED.meta_source ";
+	. ", meta_source = CASE WHEN EXCLUDED.meta_updated_at > media.meta_updated_at THEN EXCLUDED.meta_source ELSE media.meta_source END ";
     $weak_conflict = "ON CONFLICT ( id ) DO UPDATE SET "
 	. "parent_author_screen_name = COALESCE(media.parent_author_screen_name, EXCLUDED.parent_author_screen_name) "
 	. ", media_url = COALESCE(media.media_url, EXCLUDED.media_url) "
 	. ", alt_text = COALESCE(media.alt_text, EXCLUDED.alt_text) "
-	. ", meta_updated_at = GREATEST(media.meta_updated_at, EXCLUDED.meta_updated_at) ";
+	. ", meta_updated_at = GREATEST(EXCLUDED.meta_updated_at, media.meta_updated_at) "
+	. ", meta_source = CASE WHEN EXCLUDED.meta_updated_at > media.meta_updated_at THEN EXCLUDED.meta_source ELSE media.meta_source END ";
     $insert_media_sth = $dbh->prepare($command . $conflict . $returning);
     $weak_insert_media_sth = $dbh->prepare($command . $weak_conflict . $returning);
 }
