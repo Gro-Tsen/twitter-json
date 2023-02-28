@@ -386,3 +386,7 @@ data they think they can understand from the HAR dump.  Yes, this
 option should have been called something else, and no, there is no
 “help” option: you're reading whatever help there is.  Without the
 `-h` option, the script expects the JSON response itself as input.
+
+For those who wish to do the same, a description of the process I use
+to collect my own tweets is [given
+here](https://twitter.com/gro_tsen/status/1628773723175112704).
