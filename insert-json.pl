@@ -442,7 +442,8 @@ sub record_tweet {
       # being substituted, add it explicitly at the end.
       if ( defined($quoted_permalink)
 	   && ! $found_quoted_permalink_in_entities ) {
-	  $input_text .= (($input_text=~m/\s\z/)?"":" ") . $quoted_permalink;
+	  # (Note that permalink can contain unescaped '&' here.)
+	  $input_text .= (($input_text=~m/\s\z/)?"":" ") . (html_quote($quoted_permalink));
       }
       $input_text = html_unquote $input_text;
     }

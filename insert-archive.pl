@@ -294,10 +294,10 @@ sub record_tweet_v1 {
 	  for my $ent ( @{$rl->{"entities"}->{"urls"}} ) {
 	      my $idx0 = $ent->{"indices"}->[0];
 	      my $idx1 = $ent->{"indices"}->[1];
-	      if ( $ent->{"expanded_url"} =~ /\Ahttps?\:\/\/(?:mobile\.)?twitter\.com\/([A-Za-z0-9\_]+)\/status\/([0-9]+)\z/ ) {
+	      if ( $ent->{"expanded_url"} =~ /\Ahttps?\:\/\/(?:mobile\.)?twitter\.com\/([A-Za-z0-9\_]+)\/status\/([0-9]+)(?:\z|\?)/ ) {
 		  $quoted_id = $2;
 		  $quoted_author_screen_name = $1;
-	      } elsif ( $ent->{"expanded_url"} =~ /\Ahttps?\:\/\/(?:mobile\.)?twitter\.com\/i\/web\/status\/([0-9]+)\z/ ) {
+	      } elsif ( $ent->{"expanded_url"} =~ /\Ahttps?\:\/\/(?:mobile\.)?twitter\.com\/i\/web\/status\/([0-9]+)(?:\z|\?)/ ) {
 		  $quoted_id = $1;
 	      }
 	      push @substitutions, [$idx0, $idx1-$idx0, $ent->{"url"}, html_quote($ent->{"expanded_url"})];
