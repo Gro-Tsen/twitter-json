@@ -83,13 +83,13 @@ Now capture some JSON data from Twitter as follows, using Firefox (I
 assume Chrome has something similar, I don't know, I don't use it):
 
 * open a new tab, open the Firefox dev tools (ctrl-shift-K), select
-  the “network” tab, enter “`adaptive`” in the filter bar at top (the
+  the “network” tab, enter “`graphql`” in the filter bar at top (the
   one with a funnel icon), then (in the tab for which the dev tools
   have been opened), go to the URL of a Twitter search, e.g.,
   [`https://twitter.com/search?q=from%3A%40gro_tsen+include%3Anativeretweets&src=typed_query&f=live`](https://twitter.com/search?q=from%3A%40gro_tsen+include%3Anativeretweets&src=typed_query&f=live)
   to search for tweets by user `@gro_tsen`, and scroll down as far as
   desired: this should accumulate a number of requests to
-  `adaptive.json` in the network tab;
+  `SearchTimeline` in the network tab;
 
 * click on the gear (⚙︎) icon at the top right and choose “Save All As
   HAR” from the menu, and save as a `.har` file somewhere (note that
@@ -97,7 +97,7 @@ assume Chrome has something similar, I don't know, I don't use it):
   tweet data to their source requests, so maybe make it something
   memorable);
 
-* run `insert-json-v1.pl -h /path/to/the/file.har` to populate the
+* run `insert-json.pl -h /path/to/the/file.har` to populate the
   database with the captured data;
 
 * repeat as necessary for all the data you wish to capture.
@@ -109,12 +109,9 @@ tweets will be inserted in the database (and not just the quoting
 tweet).
 
 If you wish to capture a specific thread or your profile's “tweets” or
-“likes”, or your timeline, the following changes should be made
-w.r.t. the above instructions:
-
-* enter “`graphql`” in the filter bar (instead of “`adaptive`”);
-
-* use `insert-json.pl` instead of `insert-json-v1.pl` on the HAR file.
+“likes”, or your timeline, the same instructions apply: enter
+“`graphql`” in the filter bar, view the tweet, profile or timeline
+that you wish to save, then run `insert-json.pl` on the HAR file.
 
 If you wish to import data from a [Twitter
 archive](https://twitter.com/gro_tsen/status/1623376287308910605)
@@ -335,15 +332,17 @@ Twitter can return the same data in *similar but subtly different
 ways*.
 
 * The `insert-json.pl` version of the script handles JSON returned by
-  “`graphql`” type requests such as `TweetDetail`, `UserTweets` and so
-  on (pretty much everything *except* search results, AFAICT).  As
-  explained earlier, it saves results in the `authority` table with
-  `meta_source` equal to `json-feed` (this can be overridden with the
-  `-s` option if you're not happy).
+  “`graphql`” type requests such as `TweetDetail`, `UserTweets`,
+  `SearchTimeline` and so on.  As explained earlier, it saves results
+  in the `authority` table with `meta_source` equal to `json-feed`
+  (this can be overridden with the `-s` option if you're not happy).
 
-* The `insert-json-v1.pl` version of the script handles JSON returned
-  by “`adaptive`” type requests, in other words, search results.  As
-  explained earlier, it saves results in the `authority` table with
+* The `insert-json-v1.pl` version of the script was formerly uesd to
+  handle JSON returned by “`adaptive`” type requests, in other words,
+  search results.  Sometime around 2023-06, Twitter changed the format
+  of `adaptive` requests and now encapsulates them as the others,
+  making the use of this script seemingly obsolete.  As explained
+  earlier, it saves results in the `authority` table with
   `meta_source` equal to `json-feed-v1` (this can be overridden with
   the `-s` option if you're not happy).
 
