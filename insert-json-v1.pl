@@ -248,6 +248,10 @@ do_connect;
 my $global_auth_source;
 my $global_auth_date;
 
+my $global_tweet_count = 0;
+my $global_media_count = 0;
+my $global_user_count = 0;
+
 my %global_quick_user_screen_names;
 
 sub record_tweet_v1 {
@@ -420,6 +424,7 @@ sub record_tweet_v1 {
     $ret = $sth->fetchall_arrayref;
     die "insertion into database failed" unless defined($ret->[0][0]) && ($ret->[0][0] eq $id);
     $dbh->commit;
+    $global_tweet_count++;
     ## Process media, author, and retweeted or quoted tweet
     if ( defined($media_lst_r) && ref($media_lst_r) eq "ARRAY" ) {
 	foreach my $media_r ( @{$media_lst_r} ) {
@@ -528,6 +533,7 @@ sub record_media {
     $ret = $sth->fetchall_arrayref;
     die "insertion into database failed" unless defined($ret->[0][0]) && ($ret->[0][0] eq $id);
     $dbh->commit;
+    $global_media_count++;
     ## Some media include a source user:
     if ( defined($r->{"additional_media_info"}->{"source_user"}->{"id_str"}) ) {
 	my $parent_author_r = $r->{"additional_media_info"}->{"source_user"};
@@ -628,6 +634,7 @@ sub record_user_v1 {
     $ret = $sth->fetchall_arrayref;
     die "insertion into database failed" unless defined($ret->[0][0]) && ($ret->[0][0] eq $id);
     $dbh->commit;
+    $global_user_count++;
     $global_quick_user_screen_names{$id} = $screen_name;
 }
 
@@ -711,3 +718,4 @@ if ( scalar(@ARGV) ) {
     $global_auth_date = strftime("%Y-%m-%d %H:%M:%S+00:00", gmtime((stat(STDIN))[9]));
     process_content $content;
 }
+print "inserted or updated: $global_tweet_count tweets, $global_media_count media and $global_user_count users\n";

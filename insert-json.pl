@@ -248,6 +248,10 @@ do_connect;
 my $global_auth_source;
 my $global_auth_date;
 
+my $global_tweet_count = 0;
+my $global_media_count = 0;
+my $global_user_count = 0;
+
 sub record_tweet {
     # Insert tweet into database.  Arguments are the ref to the
     # tweet's (decoded) JSON, and a weak parameter indicating whether
@@ -499,6 +503,7 @@ sub record_tweet {
     $ret = $sth->fetchall_arrayref;
     die "insertion into database failed" unless defined($ret->[0][0]) && ($ret->[0][0] eq $id);
     $dbh->commit;
+    $global_tweet_count++;
     ## Process media, author, and retweeted or quoted tweet
     if ( defined($media_lst_r) && ref($media_lst_r) eq "ARRAY" ) {
 	foreach my $media_r ( @{$media_lst_r} ) {
@@ -593,6 +598,7 @@ sub record_media {
     $ret = $sth->fetchall_arrayref;
     die "insertion into database failed" unless defined($ret->[0][0]) && ($ret->[0][0] eq $id);
     $dbh->commit;
+    $global_media_count++;
     ## Some media include a source user:
     if ( defined($r->{"additional_media_info"}->{"source_user"}->{"user_results"}->{"result"})
 	 && defined($r->{"additional_media_info"}->{"source_user"}->{"user_results"}->{"result"}->{"__typename"})
@@ -696,6 +702,7 @@ sub record_user {
     $ret = $sth->fetchall_arrayref;
     die "insertion into database failed" unless defined($ret->[0][0]) && ($ret->[0][0] eq $id);
     $dbh->commit;
+    $global_user_count++;
 }
 
 sub generic_recurse {
@@ -764,3 +771,4 @@ if ( scalar(@ARGV) ) {
     $global_auth_date = strftime("%Y-%m-%d %H:%M:%S+00:00", gmtime((stat(STDIN))[9]));
     process_content $content;
 }
+print "inserted or updated: $global_tweet_count tweets, $global_media_count media and $global_user_count users\n";

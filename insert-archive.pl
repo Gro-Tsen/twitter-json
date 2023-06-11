@@ -217,6 +217,9 @@ do_connect;
 my $global_auth_source;
 my $global_auth_date;
 
+my $global_tweet_count = 0;
+my $global_media_count = 0;
+
 sub record_tweet_v1 {
     # Insert tweet into database.  Arguments are the ref to the
     # tweet's (decoded) JSON, and a weak parameter indicating whether
@@ -374,6 +377,7 @@ sub record_tweet_v1 {
     $ret = $sth->fetchall_arrayref;
     die "insertion into database failed" unless defined($ret->[0][0]) && ($ret->[0][0] eq $id);
     $dbh->commit;
+    $global_tweet_count++;
     ## Process media, author, and retweeted or quoted tweet
     if ( defined($media_lst_r) && ref($media_lst_r) eq "ARRAY" ) {
 	foreach my $media_r ( @{$media_lst_r} ) {
@@ -466,6 +470,7 @@ sub record_media {
     $ret = $sth->fetchall_arrayref;
     die "insertion into database failed" unless defined($ret->[0][0]) && ($ret->[0][0] eq $id);
     $dbh->commit;
+    $global_media_count++;
 }
 
 if ( scalar(@ARGV) != 1 ) {
@@ -506,3 +511,4 @@ while ($_ = <$f>) {
 }
 
 close $f;
+print "inserted or updated: $global_tweet_count tweets and $global_media_count media\n";

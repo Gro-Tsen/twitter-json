@@ -157,7 +157,7 @@ do_connect;
 my $global_auth_source;
 my $global_auth_date;
 
-my $test_count;
+my $global_tweet_count = 0;
 
 sub record_tweet_daml {
     # Insert tweet into database.  Arguments are the tweet's HTML
@@ -375,7 +375,7 @@ sub record_tweet_daml {
     $ret = $sth->fetchall_arrayref;
     die "insertion into database failed" unless defined($ret->[0][0]) && ($ret->[0][0] eq $id);
     $dbh->commit;
-    $test_count++;
+    $global_tweet_count++;
 }
 
 sub process_line {
@@ -405,4 +405,4 @@ if ( scalar(@ARGV) ) {
     }
 }
 
-printf "recorded %d tweets\n", $test_count;
+print "inserted or updated: $global_tweet_count tweets\n";
