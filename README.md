@@ -357,9 +357,10 @@ ways*.
   `tweets-archive` (this can be overridden with the `-s` option if
   you're not happy).
 
-* Do not attempt to use `insert-daml.pl`, it is for my own internal
-  use and will likely be of no use to anyone else (as it parses HTML
-  from a pre-existing archive of my tweets).
+* Do not attempt to use `insert-daml.pl` or `generate-daml.pl`, they
+  are for my own internal use and will likely be of no use to anyone
+  else (the first parses HTML from a pre-existing archive of my tweets
+  and the second generates an archive in such a format).
 
 All versions of the script allow a `-d` option to specify the database
 to which the script should connect (to specify the PostgreSQL server
