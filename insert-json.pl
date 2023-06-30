@@ -324,9 +324,19 @@ sub record_tweet {
     my ($retweeted_id, $retweeted_author_id, $retweeted_author_screen_name);
     if ( defined($rl->{"retweeted_status_result"}) ) {RETWEETED_IF:{
 	my $rtwd = $rl->{"retweeted_status_result"}->{"result"};
+	if ( defined($rtwd)
+	     && defined($rtwd->{"__typename"})
+	     && ( $rtwd->{"__typename"} eq "TweetWithVisibilityResults" )
+	     && defined($rtwd->{"tweet"}) ) {
+	    # TweetWithVisibilityResults objects are used to limit
+	    # replies.  We just skip to the "tweet" content, and fake
+	    # its __typename.
+	    $rtwd = $rtwd->{"tweet"};
+	    $rtwd->{"__typename"} = "Tweet";  # Fake it!
+	}
 	unless ( defined($rtwd)
 		 && defined($rtwd->{"__typename"})
-		 && ($rtwd->{"__typename"} eq "Tweet")
+		 && ( $rtwd->{"__typename"} eq "Tweet" )
 		 && defined($rtwd->{"rest_id"}) ) {
 	    print STDERR "tweet $id retweeting another does not give retweeted id\n";
 	    last RETWEETED_IF;
@@ -365,9 +375,19 @@ sub record_tweet {
 	#      && ($qtwd->{"__typename"} eq "TweetTombstone") ) {
 	#     last QUOTED_IF;
 	# }
+	if ( defined($qtwd)
+	     && defined($qtwd->{"__typename"})
+	     && ( $qtwd->{"__typename"} eq "TweetWithVisibilityResults" )
+	     && defined($qtwd->{"tweet"}) ) {
+	    # TweetWithVisibilityResults objects are used to limit
+	    # replies.  We just skip to the "tweet" content, and fake
+	    # its __typename.
+	    $qtwd = $qtwd->{"tweet"};
+	    $qtwd->{"__typename"} = "Tweet";  # Fake it!
+	}
 	unless ( defined($qtwd)
 		 && defined($qtwd->{"__typename"})
-		 && ($qtwd->{"__typename"} eq "Tweet") ) {
+		 && ( $qtwd->{"__typename"} eq "Tweet" ) ) {
 	    last QUOTED_IF;
 	}
 	unless ( defined($qtwd->{"rest_id"})
@@ -714,12 +734,19 @@ sub generic_recurse {
 	    generic_recurse ($r->[$i]);
 	}
     } elsif ( ref($r) eq "HASH" ) {
-	if ( defined($r->{"__typename"}) && $r->{"__typename"} eq "Tweet"
+	if ( defined($r->{"__typename"})
+	     && ( $r->{"__typename"} eq "Tweet" )
 	     && defined($r->{"rest_id"}) ) {
 	    record_tweet($r, 0);
 	    return;  # Recusion is done inside record_tweet
+	} elsif ( defined($r->{"__typename"})
+	     && ( $r->{"__typename"} eq "TweetWithVisibilityResults" )
+	     && defined($r->{"tweet"}) ) {
+	    record_tweet($r->{"tweet"}, 0);
+	    return;  # Recusion is done inside record_tweet
 	}
-	if ( defined($r->{"__typename"}) && $r->{"__typename"} eq "User"
+	if ( defined($r->{"__typename"})
+	     && ( $r->{"__typename"} eq "User" )
 	     && defined($r->{"rest_id"}) ) {
 	    record_user($r, 0);
 	    return;
