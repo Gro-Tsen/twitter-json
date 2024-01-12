@@ -313,7 +313,10 @@ sub record_tweet {
       my @substitutions_html;
       my $found_quoted_permalink_in_entities = 0;
       if ( defined($retweeted_id) ) {SUB_RETWETED_IF:{
-	  unless ( $html_text =~ m/\ART\ \@([A-Za-z0-9\_]+)\:/ && $1 eq $retweeted_author_screen_name ) {
+	  unless ( $html_text =~ m/\ART\ \@([A-Za-z0-9\_]+)\:/
+# This seems to barf on harmless name changes
+##		   && $1 eq $retweeted_author_screen_name
+	      ) {
 	      print STDERR "tweet $id retweeting $retweeted_id follows bad pattern\n";
 	      last SUB_RETWEETED_IF;
 	  }
