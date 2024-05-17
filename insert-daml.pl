@@ -183,7 +183,7 @@ sub record_tweet_daml {
     if ( $attrlist =~ m/\s+xml\:lang\=\"([A-Za-z0-9\-]+)\"/ ) {
 	$lang = $1;
     }
-    unless ( $permalink =~ m/\Ahttps\:\/\/twitter\.com\/([A-Za-z0-9\_]+)\/status\/([0-9]+)\z/
+    unless ( $permalink =~ m/\Ahttps\:\/\/(?twitter|x)\.com\/([A-Za-z0-9\_]+)\/status\/([0-9]+)\z/
 	&& $2 eq $id ) {
 	print STDERR "the following tweet line has badly formed permalink: aborting\n";
 	print STDERR "line: $line";
@@ -199,7 +199,7 @@ sub record_tweet_daml {
     my $created_at_iso = $created_at->strftime("%Y-%m-%d %H:%M:%S%z");
     my ($replyto_id, $replyto_author_screen_name);
     if ( defined($replylink) ) {
-	unless ( $replylink =~ m/\Ahttps\:\/\/twitter\.com\/([A-Za-z0-9\_]+)\/status\/([0-9]+)\z/ ) {
+	unless ( $replylink =~ m/\Ahttps\:\/\/(?:twitter|x)\.com\/([A-Za-z0-9\_]+)\/status\/([0-9]+)\z/ ) {
 	    print STDERR "the following tweet line has badly formed reply link: aborting\n";
 	    print STDERR "line: $line";
 	    return;
@@ -213,7 +213,7 @@ sub record_tweet_daml {
     my ($quoted_id, $quoted_author_screen_name);
     if ( $full_text_html =~ s/\A\<a\s+href\=\"([^\<\>]*)\"\>RT\<\/a\>/RT/ ) {
 	my $retweetlink = $1;
-	unless ( $retweetlink =~ m/\Ahttps\:\/\/twitter\.com\/([A-Za-z0-9\_]+)\/status\/([0-9]+)\z/ ) {
+	unless ( $retweetlink =~ m/\Ahttps\:\/\/(?:twitter|x)\.com\/([A-Za-z0-9\_]+)\/status\/([0-9]+)\z/ ) {
 	    print STDERR "the following tweet line has badly formed retweet link: aborting\n";
 	    print STDERR "line: $line";
 	    return;
@@ -279,7 +279,7 @@ sub record_tweet_daml {
 		substr($full_text, $started_link_position) = $fake_url;
 	    } else {
 		my $fake_url = "org-madore-twitter-link://" . $id . "/url/" . (scalar(@urls));
-		if ( $started_link_target =~ m/\Ahttps\:\/\/twitter\.com\/([A-Za-z0-9\_]+)\/status\/([0-9]+)\z/ ) {
+		if ( $started_link_target =~ m/\Ahttps\:\/\/(?:twitter|x)\.com\/([A-Za-z0-9\_]+)\/status\/([0-9]+)\z/ ) {
 		    $quoted_id = $2;
 		    $quoted_author_screen_name = $1;
 		    $fake_url = $started_link_target;

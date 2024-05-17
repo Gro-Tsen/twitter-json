@@ -309,7 +309,7 @@ sub record_tweet_v1 {
     $quoted_id = $rl->{"quoted_status_id_str"};
     my $quoted_permalink = $rl->{"quoted_status_permalink"}->{"expanded"};
     if ( defined($quoted_permalink)
-	 && $quoted_permalink =~ /\Ahttps?\:\/\/(?:mobile\.)?twitter\.com\/([A-Za-z0-9\_]+)\/status\/([0-9]+)(?:\z|\?)/ ) {
+	 && $quoted_permalink =~ /\Ahttps?\:\/\/(?:mobile\.)?(?:twitter|x)\.com\/([A-Za-z0-9\_]+)\/status\/([0-9]+)(?:\z|\?)/ ) {
 	$quoted_author_screen_name = $1;
 	$quoted_id = $quoted_id // $2;
     }
@@ -476,7 +476,7 @@ sub record_media {
     my $parent_author_screen_name;
     my $expanded_url = $r->{"expanded_url"};
     if ( defined($expanded_url)
-	 && $expanded_url =~ /\Ahttps?\:\/\/(?:mobile\.)?twitter\.com\/([A-Za-z0-9\_]+)\/status\/([0-9]+)\// ) {
+	 && $expanded_url =~ /\Ahttps?\:\/\/(?:mobile\.)?(?:twitter|x)\.com\/([A-Za-z0-9\_]+)\/status\/([0-9]+)\// ) {
 	$parent_author_screen_name = $1;
 	if ( $parent_id ne $2 ) {
 	    print STDERR "media $id has unexpected parent id in expanded url\n";

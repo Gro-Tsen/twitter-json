@@ -297,10 +297,10 @@ sub record_tweet_v1 {
 	  for my $ent ( @{$rl->{"entities"}->{"urls"}} ) {
 	      my $idx0 = $ent->{"indices"}->[0];
 	      my $idx1 = $ent->{"indices"}->[1];
-	      if ( $ent->{"expanded_url"} =~ /\Ahttps?\:\/\/(?:mobile\.)?twitter\.com\/([A-Za-z0-9\_]+)\/status\/([0-9]+)(?:\z|\?)/ ) {
+	      if ( $ent->{"expanded_url"} =~ /\Ahttps?\:\/\/(?:mobile\.)?(?:twitter|x)\.com\/([A-Za-z0-9\_]+)\/status\/([0-9]+)(?:\z|\?)/ ) {
 		  $quoted_id = $2;
 		  $quoted_author_screen_name = $1;
-	      } elsif ( $ent->{"expanded_url"} =~ /\Ahttps?\:\/\/(?:mobile\.)?twitter\.com\/i\/web\/status\/([0-9]+)(?:\z|\?)/ ) {
+	      } elsif ( $ent->{"expanded_url"} =~ /\Ahttps?\:\/\/(?:mobile\.)?(?:twitter|x)\.com\/i\/web\/status\/([0-9]+)(?:\z|\?)/ ) {
 		  $quoted_id = $1;
 	      }
 	      push @substitutions, [$idx0, $idx1-$idx0, $ent->{"url"}, html_quote($ent->{"expanded_url"})];
@@ -412,7 +412,7 @@ sub record_media {
     my $parent_author_screen_name;
     my $expanded_url = $r->{"expanded_url"};
     if ( defined($expanded_url)
-	 && $expanded_url =~ /\Ahttps?\:\/\/(?:mobile\.)?twitter\.com\/([A-Za-z0-9\_]+)\/status\/([0-9]+)\// ) {
+	 && $expanded_url =~ /\Ahttps?\:\/\/(?:mobile\.)?(?:twitter|x)\.com\/([A-Za-z0-9\_]+)\/status\/([0-9]+)\// ) {
 	$parent_author_screen_name = $1;
 	if ( $parent_id ne $2 ) {
 	    print STDERR "media $id has unexpected parent id in expanded url\n";
