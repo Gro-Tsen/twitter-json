@@ -442,6 +442,10 @@ sub record_tweet {
 	  for my $ent ( @{$rl->{"entities"}->{"urls"}} ) {
 	      my $idx0 = $ent->{"indices"}->[0];
 	      my $idx1 = $ent->{"indices"}->[1];
+	      unless ( defined($ent->{"expanded_url"}) ) {
+		  print STDERR "substitution missing expanded_url: skipping\n";
+		  next;
+	      }
 	      push @substitutions, [$idx0, $idx1-$idx0, $ent->{"url"}, html_quote($ent->{"expanded_url"})];
 	      if ( defined($quoted_permalink)
 		   && $quoted_permalink eq $ent->{"expanded_url"} ) {
@@ -676,6 +680,10 @@ sub record_user {
 	for my $ent ( @{$rl->{"entities"}->{"description"}->{"urls"}} ) {
 	    my $idx0 = $ent->{"indices"}->[0];
 	    my $idx1 = $ent->{"indices"}->[1];
+	    unless ( defined($ent->{"expanded_url"}) ) {
+		print STDERR "substitution missing expanded_url: skipping\n";
+		next;
+	    }
 	    # NO html_quote here (the description is NOT html-encoded)
 	    push @substitutions, [$idx0, $idx1-$idx0, $ent->{"url"}, $ent->{"expanded_url"}];
 	}

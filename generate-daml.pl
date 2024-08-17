@@ -352,6 +352,10 @@ sub record_tweet {
 	  for my $ent ( @{$rl->{"entities"}->{"urls"}} ) {
 	      my $idx0 = $ent->{"indices"}->[0];
 	      my $idx1 = $ent->{"indices"}->[1];
+	      unless ( defined($ent->{"expanded_url"}) ) {
+		  print STDERR "substitution missing expanded_url: skipping\n";
+		  next;
+	      }
 	      push @substitutions, [$idx0, $idx1-$idx0, $ent->{"url"}, html_quote($ent->{"expanded_url"})];
 	      push @substitutions_html, [$idx0, $idx1-$idx0, $ent->{"url"}, html_quote($ent->{"display_url"}), "<a href=\"".html_quote($ent->{"expanded_url"})."\">", "</a>"];
 	      if ( defined($quoted_permalink)
@@ -365,6 +369,10 @@ sub record_tweet {
 	  for my $ent ( @{$media_lst_r} ) {
 	      my $idx0 = $ent->{"indices"}->[0];
 	      my $idx1 = $ent->{"indices"}->[1];
+	      unless ( defined($ent->{"expanded_url"}) ) {
+		  print STDERR "substitution missing expanded_url: skipping\n";
+		  next;
+	      }
 	      # Multiple media entities may subtitute the same part of
 	      # the tweet: do this only once.
 	      unless ( defined($previdx0) && $idx0==$previdx0 ) {
