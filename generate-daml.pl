@@ -17,8 +17,6 @@ my $har_mode = $opts{h};
 
 my $record_all = $opts{a};
 
-my $global_weak = $opts{w};
-
 my $global_user_id = $ENV{"TWEETS_ARCHIVE_USER_ID"};
 unless ( defined($global_user_id) ) {
     die "please run this program with TWEETS_ARCHIVE_USER_ID evironment variables set";
@@ -127,10 +125,8 @@ my $global_tweet_count = 0;
 
 sub record_tweet {
     # Insert tweet into file.  Arguments are the ref to the
-    # tweet's (decoded) JSON, and a weak parameter indicating whether
-    # we should leave existing entries.
+    # tweet's (decoded) JSON.
     my $r = shift;
-    my $weak = shift || $global_weak;  # If 1 leave existing records be
     ## Basic stuff
     my $id = $r->{"rest_id"};
     unless ( defined($id) ) {
