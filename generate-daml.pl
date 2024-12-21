@@ -400,10 +400,10 @@ sub record_tweet {
     my $quote_count = $rl->{"quote_count"};
     my $reply_count = $rl->{"reply_count"};
     ## Create HTML line
-    unless ( $record_all || ( $author_id == $global_user_id ) ) {
+    unless ( $record_all || ( $author_id eq $global_user_id ) ) {
 	return;
     }
-    my $html_userlink = $author_id == $global_user_id ? "" : sprintf(" <a href=\"%s\">\@%s</a>", "https://twitter.com/".$author_screen_name, $author_screen_name);
+    my $html_userlink = $author_id eq $global_user_id ? "" : sprintf(" <a href=\"%s\">\@%s</a>", "https://twitter.com/".$author_screen_name, $author_screen_name);
     my $html_langattr = defined($lang) && $lang ne "und" ? " xml:lang=\"$lang\"" : "";
     my $html_replying = "";
     if ( defined($replyto_id) ) {
