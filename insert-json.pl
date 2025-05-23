@@ -28,6 +28,8 @@ my $json_decoder_utf8 = JSON::XS->new->utf8;
 
 # binmode STDOUT, ":utf8";
 
+my $global_debug_id;
+
 sub html_quote {
     my $str = shift;
     $str =~ s/\&/\&amp;/g;
@@ -66,12 +68,16 @@ sub substitute_in_string {
     for my $sb ( @subs ) {
 	my $idx0 = $sb->[0] + $corr;
 	unless ( $idx0>=$minbar ) {
+	    print STDERR "DEBUG: id: $global_debug_id\n" if defined($global_debug_id);
 	    print STDERR "substitute_in_string: attempting to overlap substitutions\n";
 	    next;
 	}
 	my $len = $sb->[1];
 	if ( defined($sb->[2]) ) {
-	    print STDERR (sprintf("substitute_in_string: verification failed: expecting \"%s\", got \"%s\"\n", $sb->[2], substr($str, $idx0, $len))) unless substr($str, $idx0, $len) eq $sb->[2];
+	    unless ( substr($str, $idx0, $len) eq $sb->[2] ) {
+		print STDERR "DEBUG: id: $global_debug_id\n" if defined($global_debug_id);
+		print STDERR (sprintf("substitute_in_string: verification failed: expecting \"%s\", got \"%s\"\n", $sb->[2], substr($str, $idx0, $len)));
+	    }
 	}
 	my $repl = ($sb->[4] // "") . ($sb->[3] // substr($str, $idx0, $len)) . ($sb->[5] // "");
 	my $newlen = length($repl);
@@ -264,6 +270,7 @@ sub record_tweet {
 	print STDERR "tweet has no id: aborting\n";
 	return;
     }
+    $global_debug_id = "tweet $id";
     unless ( $id =~ m/\A[0-9]+\z/ ) {
 	print STDERR "tweet has badly formed id: aborting\n";
 	return;
@@ -556,6 +563,7 @@ sub record_media {
 	print STDERR "media from tweet $caller_id has no id: aborting\n";
 	return;
     }
+    $global_debug_id = "media $id";
     unless ( $id =~ m/\A[0-9]+\z/ ) {
 	print STDERR "media from tweet $caller_id has badly formed id: aborting\n";
 	return;
@@ -645,6 +653,7 @@ sub record_user {
 	print STDERR "user has no id: aborting\n";
 	return;
     }
+    $global_debug_id = "user $id";
     unless ( $id =~ m/\A[0-9]+\z/ ) {
 	print STDERR "user has badly formed id: aborting\n";
 	return;
