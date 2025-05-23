@@ -172,7 +172,7 @@ sub record_tweet {
 	return;
     }
     my $author_r = $r->{"core"}->{"user_results"}->{"result"};
-    my $author_screen_name = $author_r->{"legacy"}->{"screen_name"};
+    my $author_screen_name = $author_r->{"core"}->{"screen_name"} // $author_r->{"legacy"}->{"screen_name"};
     unless ( defined($author_screen_name) ) {
 	print STDERR "tweet $id has no author screen name\n";
     }
@@ -228,7 +228,8 @@ sub record_tweet {
 	    print STDERR "tweet $id retweeting $retweeted_id gives bad or missing author object\n";
 	    last RETWEETED_IF;
 	}
-	$retweeted_author_screen_name = $rtwd->{"core"}->{"user_results"}->{"result"}->{"legacy"}->{"screen_name"};
+	my $retweeted_author_r = $rtwd->{"core"}->{"user_results"}->{"result"};
+	$retweeted_author_screen_name = $retweeted_author_r->{"core"}->{"screen_name"} // $retweeted_author_r->{"legacy"}->{"screen_name"};
 	unless ( defined($retweeted_author_screen_name) ) {
 	    print STDERR "tweet $id retweeting $retweeted_id gives no author screen name\n";
 	    last RETWEETED_IF;
@@ -282,7 +283,8 @@ sub record_tweet {
 	    print STDERR "tweet $id quoting $quoted_id gives bad or missing author object\n";
 	    last QUOTED_IF;
 	}
-	$quoted_author_screen_name = $qtwd->{"core"}->{"user_results"}->{"result"}->{"legacy"}->{"screen_name"};
+	my $quoted_author_r = $qtwd->{"core"}->{"user_results"}->{"result"};
+	$quoted_author_screen_name = $quoted_author_r->{"core"}->{"screen_name"} // $quoted_author_r->{"legacy"}->{"screen_name"};
 	unless ( defined($quoted_author_screen_name) ) {
 	    print STDERR "tweet $id quoting $quoted_id gives no author screen name\n";
 	    last QUOTED_IF;
